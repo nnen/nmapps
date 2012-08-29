@@ -5,6 +5,9 @@ import signal
 import logging
 
 
+__all__ = ["PIDFile", "Daemon", ]
+
+
 LOGGER = logging.getLogger(__name__)
 
 
