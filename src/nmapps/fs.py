@@ -1,10 +1,11 @@
 #!/usr/bin/python
 
 import sys
+import os
 import os.path as path
 
 
-__all__ = ["Path", "File", ]
+__all__ = ["Path", "File", "Directory", ]
 
 
 class Path(object):
@@ -27,7 +28,7 @@ class Path(object):
     @property
     def base(self):
         return path.basename(self.value)
-
+    
     @property
     def dir(self):
         return Path(path.dirname(self.value))
@@ -63,10 +64,10 @@ class Path(object):
     
     def __str__(self):
         return str(self.value)
-
+    
     def __unicode__(self):
         return unicode(self.value)
-
+    
     def __repr__(self):
         return "Path(%r)" % (self.value, )
     
@@ -74,13 +75,30 @@ class Path(object):
         right = Path.make(right)
         return Path(path.join(self.value, right.value))
     
+    def get_parts(self):
+        return self.value.split(os.sep)
+    
+    def iter_parents(self):
+        parts = self.real.get_parts()
+
+        if str(self.real).startswith(os.sep):
+            root = os.sep
+        else:
+            root = parts[0]
+        
+        for end in range(1, len(parts) - 1):
+            yield Path.make(os.sep.join(parts[:-end]))
+        
+        yield Path.make(root)
+    
     def add_to_import(self):
         sys.path.insert(1, self.abs)
     
-    def make(self, value):
+    @classmethod
+    def make(cls, value):
         if isinstance(value, Path):
             return value
-        value = getattr(path, "path", path)
+        value = getattr(value, "path", value)
         if isinstance(value, basestring):
             value = Path(value)
         else:
@@ -99,10 +117,50 @@ class File(object):
     
     @property
     def extension(self):
-        pass
+        return self.path.extension
     
-    def __init__(self, path):
-        self.path = Path.make(path)
+    def __init__(self, pth):
+        self.path = Path.make(pth)
+    
+    def __repr__(self):
+        return "%s(%r)" % (type(self).__name__, str(self.path), )
+    
+    def __str__(self):
+        return str(self.path)
+    
+    def open(self, mode = "r"):
+        return open(self.path.real, mode)
+    
+    def read(self):
+        c = None
+        try:
+            f = self.open()
+            c = f.read()
+            f.close()
+        except Exception, e:
+            return None
+        return c
+    
+    @classmethod
+    def make(cls, pth):
+        path = Path.make(pth)
+        
+        if path.is_dir:
+            return Directory(pth)
+        return File(pth)
+
+
+class Directory(File):
+    @property
+    def exists(self):
+        return path.isdir(self.path)
+    
+    def list(self):
+        files = os.listdir(str(self.path))
+        result = []
+        for f in files:
+            result.append(File.make(self.path + f))
+        return result
 
 
 def executing_file():
