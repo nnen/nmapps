@@ -3,8 +3,11 @@
 
 from setuptools import setup
 import sys
+import os
+import os.path as path
 
 
+os.chdir(path.dirname(__file__))
 sys.path.insert(1, 'src')
 import nmapps
 
