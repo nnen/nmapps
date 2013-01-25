@@ -3,9 +3,10 @@
 import sys
 import os
 import os.path as path
+import zipfile
 
 
-__all__ = ["Path", "File", "Directory", ]
+__all__ = ["Path", "File", "Directory", "ZipFile", ]
 
 
 class Path(object):
@@ -143,10 +144,14 @@ class File(object):
     
     @classmethod
     def make(cls, pth):
-        path = Path.make(pth)
+        pth = Path.make(pth)
         
-        if path.is_dir:
+        if pth.is_dir:
             return Directory(pth)
+        
+        if pth.extension.lower() in ZipFile.EXTENSIONS:
+            return ZipFile(pth)
+        
         return File(pth)
 
 
@@ -155,12 +160,61 @@ class Directory(File):
     def exists(self):
         return path.isdir(self.path)
     
+    def __init__(self, pth = os.curdir):
+        File.__init__(self, pth)
+    
+    def __iter__(self):
+        return self.iter_list()
+    
+    def iter_list(self):
+        for f in os.listdir(str(self.path)):
+            yield File.make(self.path + f)
+    
     def list(self):
         files = os.listdir(str(self.path))
         result = []
         for f in files:
             result.append(File.make(self.path + f))
         return result
+
+
+class ZipFile(File):
+    EXTENSIONS = set(["zip", "jar", "egg", ])
+    
+    def __init__(self, pth):
+        File.__init__(self, pth)
+        self._zip_file = None
+    
+    @property
+    def zip_file(self):
+        if self._zip_file is None:
+            self._zip_file = zipfile.ZipFile(str(self.path), "r")
+        return self._zip_file
+    
+    def iter_list(self):
+        for info in self.zip_file.infolist():
+            yield ZipFileEntry(self, info)
+    
+    def list(self):
+        return list(self.iter_list())
+
+
+class ZipFileEntry(object):
+    def __init__(self, zip_file, info):
+        self.zip_file = zip_file
+        self.info = info
+    
+    def __repr__(self):
+        return "ZipFileEntry(%r, %r)" % (self.zip_file, self.info.filename, )
+    
+    def __str__(self):
+        return self.info.filename
+    
+    def open(self):
+        return self.zip_file.zip_file.open(self.info)
+    
+    def read(self):
+        return self.zip_file.zip_file.read(self.info)
 
 
 def executing_file():
