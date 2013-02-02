@@ -7,7 +7,7 @@ import os
 import os.path as path
 
 
-os.chdir(path.dirname(__file__))
+os.chdir(path.realpath(path.dirname(__file__)))
 sys.path.insert(1, 'src')
 import nmapps
 
@@ -28,11 +28,11 @@ setup(
     keywords    = 'library unix application framework',
     license     = 'Lesser General Public License v3',
     
-    scripts     = ['src/scripts/eggimp.py', ],
+    #scripts     = ['src/scripts/eggimp.py', ],
     
     data_files  = [('', ['src/__main__.py', ]), ],
     
-    # test_suite = 'test.test_nmevent',
+    test_suite = 'nmapps.tests',
     
     classifiers = [
         'Development Status :: 3 - Alpha',
