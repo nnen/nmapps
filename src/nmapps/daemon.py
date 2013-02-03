@@ -4,11 +4,17 @@ import os, sys, time, atexit
 import signal
 import logging
 
+from nmapps.utils import UserException
+
 
 __all__ = ["PIDFile", "Daemon", ]
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class DaemonException(UserException):
+    pass
 
 
 class PIDFile(object):
@@ -56,7 +62,15 @@ class PIDFile(object):
             return pid
         except IOError:
             return None
-
+    
+    def test_write(self):
+        try:
+            self.lock()
+            self.unlock()
+        except IOError as e:
+            return e.errno
+        return None
+    
     @classmethod
     def normalize(cls, value):
         if isinstance(value, cls):
@@ -106,7 +120,7 @@ class Daemon(object):
         except OSError, e: 
             sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
             sys.exit(1)
-    
+        
         # decouple from parent environment
         os.chdir("/") 
         os.setsid() 
@@ -121,7 +135,7 @@ class Daemon(object):
         except OSError, e: 
             sys.stderr.write("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
             sys.exit(1) 
-    
+        
         # redirect standard file descriptors
         sys.stdout.flush()
         sys.stderr.flush()
