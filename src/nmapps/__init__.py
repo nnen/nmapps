@@ -5,10 +5,10 @@ from daemon import *
 from fs import *
 
 
-__version__ = "0.2"
+__version__ = "0.3dev"
 __doc__ = """
-nmapps - Simple unix program framework
-======================================
+The nmapps package is a collection of utilities to help write unix command-line
+application. 
 """
 
 

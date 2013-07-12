@@ -1,4 +1,10 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
+"""nmapps.fs module.
+
+Author: Jan Milík <milikjan@fit.cvut.cz>
+"""
+
 
 import sys
 import os
