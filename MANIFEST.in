@@ -1,4 +1,5 @@
-recursive-include doc/html *
+include doc/conf.py
+recursive-include doc *.rst
 prune doc/html/.doctrees
 exclude doc/html/.buildinfo
 include LICENSE
