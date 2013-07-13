@@ -1,17 +1,24 @@
-# -*- coding: utf8 -*-
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+"""The nmapps package is a collection of utilities to help write unix
+command-line application. 
 
-#from daemon import Daemon
+Author: Jan Milík <milikjan@fit.cvut.cz>
+"""
+
+
+__version__ = "0.3dev"
+
+
+from app import *
 from daemon import *
 from fs import *
 
 
-__version__ = "0.3dev"
-__doc__ = """
-The nmapps package is a collection of utilities to help write unix command-line
-application. 
-"""
+def main():
+    print __doc__
 
 
 if __name__ == "__main__":
-    print __doc__
+    main()
 

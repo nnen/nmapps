@@ -2,7 +2,7 @@
 
 import logging
 
-from nmapps.utils import UserException
+from .utils import UserException
 
 
 LOGGER = logging.getLogger("nmapps.injection")

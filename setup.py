@@ -31,10 +31,10 @@ setup(
     #scripts     = ['src/scripts/eggimp.py', ],
     
     entry_points = {
-        "console_scripts": ["nmapps = nmapps.util:main", ],
+        "console_scripts": ["nmapps = nmapps.tool:main", ],
     },
     
-    data_files  = [('', ['src/__main__.py', ]), ],
+    #data_files  = [('', ['src/__main__.py', ]), ],
     
     test_suite = 'nmapps.tests',
     
