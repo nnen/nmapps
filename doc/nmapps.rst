@@ -57,14 +57,6 @@ nmapps Package
     :undoc-members:
     :show-inheritance:
 
-:mod:`util` Module
-------------------
-
-.. automodule:: nmapps.util
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 :mod:`utils` Module
 -------------------
 

@@ -5,12 +5,13 @@
 Author: Jan Milík <milikjan@fit.cvut.cz>
 """
 
-
+import sys
 import shutil
 
 from . import __version__
 from . import app
 from . import fs
+from . import bundle
 
 
 class UtilApp(app.CommandApp):
@@ -25,6 +26,11 @@ class UtilApp(app.CommandApp):
     def cmd_version(self, cmd, cmd_args):
         """Print out nmapps package version."""
         print "nmapps %s" % (__version__, )
+    
+    def cmd_which(self, cmd, cmd_args):
+        """Print out the bundle the application is running from."""
+        b = bundle.get_bundle(__file__)
+        sys.stderr.write("Bundle: %r\n" % (b, ))
     
     def cmd_eggimp(self, cmd, cmd_args):
         """Copy the eggimp.py script to the current directory."""

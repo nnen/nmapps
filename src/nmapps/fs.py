@@ -10,9 +10,42 @@ import sys
 import os
 import os.path as path
 import zipfile
+import logging
 
 
-__all__ = ["Path", "File", "Directory", "ZipFile", ]
+__all__ = ["Path", "File", "Directory", "ZipFile", "replace_ext", "executing_file", ]
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def replace_ext(pth, extension = None):
+    """
+    Replaces extension in a path string.
+    
+    >>> replace_ext("/path/to/file.c")
+    '/path/to/file'
+    >>> replace_ext("/path/to/file.dot", "svg")
+    '/path/to/file.svg'
+    >>> replace_ext("/path/to/file", "log")
+    '/path/to/file.log'
+    >>> replace_ext("/some/dotted.path/file.md", "html")
+    '/some/dotted.path/file.html'
+    >>> replace_ext("/some/dotted.path/file", "html")
+    '/some/dotted.path/file.html'
+    """
+    limit = pth.rfind(os.sep)
+    limit = len(pth) if limit < 0 else limit
+    dot = pth.rfind(".", limit)
+    
+    if dot < 0:
+        left = pth
+    else:
+        left = pth[:dot]
+    
+    if extension is None:
+        return left
+    return left + "." + extension
 
 
 class Path(object):
@@ -23,7 +56,7 @@ class Path(object):
     @property
     def is_dir(self):
         return path.isdir(self.value)
-
+    
     @property
     def is_abs(self):
         return path.isabs(self.value)
@@ -46,7 +79,7 @@ class Path(object):
         if len(parts) > 1:
             return parts[-1]
         return ""
-
+    
     @property
     def base_without_ext(self):
         ext = self.extension
@@ -82,6 +115,12 @@ class Path(object):
         right = Path.make(right)
         return Path(path.join(self.value, right.value))
     
+    def replace_ext(self, extension):
+        return Path(replace_ext(self.value, extension))
+    
+    def base_with_ext(self, extension):
+        return replace_ext(self.base, extension)
+    
     def get_parts(self):
         return self.value.split(os.sep)
     
@@ -111,6 +150,10 @@ class Path(object):
         else:
             raise TypeError("Type \"" + type(value).__name__ + "\" is not supported.")
         return value
+    
+    @classmethod
+    def get_current(cls):
+        return Path(os.getcwd())
 
 
 class File(object):
@@ -136,7 +179,10 @@ class File(object):
         return str(self.path)
     
     def open(self, mode = "r"):
-        return open(self.path.real, mode)
+        try:
+            return open(self.path.real, mode)
+        except Exception, e:
+            LOGGER.exception("Failed to open a file.", extra = {"path": str(self.path.real)})
     
     def read(self):
         c = None
@@ -145,6 +191,7 @@ class File(object):
             c = f.read()
             f.close()
         except Exception, e:
+            LOGGER.exception(e, extra = {"path": str(self.path)})
             return None
         return c
     
@@ -242,4 +289,5 @@ def foo():
     s = inspect.stack()
     print "\n"
     pprint.pprint(s)
+
 

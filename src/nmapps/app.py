@@ -11,8 +11,59 @@ import errno
 import argparse
 import logging
 
+import utils
+import fs
+
 
 LOGGER = logging.getLogger(__name__)
+
+
+class AbstractFile(object):
+    @property
+    def description(self):
+        raise NotImplementedError
+
+    def __init__(self):
+        self.path = None
+    
+    def __str__(self):
+        return self.description
+    
+    def get_input(self):
+        raise NotImplementedError
+    
+    def get_output(self):
+        raise NotImplementedError
+    
+    def get_output_file_name(self, extension = None, default_name = "output"):
+        if extension:
+            return default_name + "." + extension
+        return default_name
+    
+    def get_output_file(self, extension = None, default_name = "output"):
+        raise NotImplementedError
+
+
+class File(AbstractFile):
+    def __init__(self, path):
+        AbstractFile.__init__(self)
+        self.path = fs.Path.make(path)
+
+        self._input = None
+        self._output = None
+    
+    def get_input(self):
+        if self._input is None:
+            self._input = open(str(self.path), "r")
+        return self._input
+    
+    def get_output(self):
+        if self._output is None:
+            self._output = open(str(self.path), "w")
+        return self._output
+    
+    def get_output_file_name(self, extension = None, default_name = "output"):
+        pass
 
 
 def guess_app_basename(fallback = None):
@@ -24,6 +75,9 @@ def guess_app_basename(fallback = None):
 
 
 class AppBase(object):
+    """Base class for CLI Python applications.
+    """
+    
     def __init__(self, basename = None):
         self.basename = (basename or
                          guess_app_basename() or
@@ -52,10 +106,82 @@ class AppBase(object):
         raise NotImplementedError()
 
 
+class Command(object):
+    """Represents a :class:`CommandApp` command.
+    """
+    
+    METHOD_PREFIX = "cmd_"
+    DECORATOR_ATTR = "__app_cmd__"
+    
+    def __init__(self, name, desc = None, callback = None):
+        self.name = name
+        self.description = desc
+        self.callback = callback
+    
+    def execute(self, *args, **kwargs):
+        self.callback(*args, **kwargs)
+    
+    @classmethod
+    def decorate(cls, name, desc = None):
+        if hasattr(name, "im_func") or hasattr(name, "func_code"):
+            setattr(name, cls.DECORATOR_ATTR, {
+                "name": cls.method_name_to_cmd(name.__name__),
+                "desc": name.__doc__,
+            })
+            return name
+        
+        def decorator(fn):
+            setattr(fn, cls.DECORATOR_ATTR, {
+                "name": name,
+                "desc": desc or fn.__doc__,
+            })
+            return fn
+        return decorator
+    
+    @classmethod
+    def method_name_to_cmd(cls, name):
+        if name.startswith(cls.METHOD_PREFIX):
+            return name[len(cls.METHOD_PREFIX):]
+        return name
+    
+    @classmethod
+    def from_method(cls, method):
+        dec = getattr(method, cls.DECORATOR_ATTR, None)
+        if dec is not None:
+            return cls(dec["name"], dec["desc"], method)
+        
+        if not (hasattr(method, "__name__") and method.__name__.startswith(cls.METHOD_PREFIX)):
+            return None
+        
+        cmd = method.__name__[len(cls.METHOD_PREFIX):]
+        desc = getattr(method, "__doc__", None)
+        return cls(cmd, desc, method)
+
+
+appcmd = Command.decorate
+
+
 class CommandApp(AppBase):
+    """Base class for CLI applications that execute multiple named commands.
+    
+    As an example, see the :class:`DaemonControlApp` class, which takes the
+    `start`, `stop`, `restart` and `status` commands to start, stop, restart
+    and query status of a daemon.
+    
+    By default, the application supports the `help` command, which lists all
+    the registered commands with a brief description.
+    """
+    
     def __init__(self, basename = None):
         AppBase.__init__(self, basename)
+        
+        self.commands = {}
+        self.cmd_map = utils.PrefixDict()
         self.default_command = None
+        
+        self.discover_commands()
+    
+    #### AppBase implementation #####################################
     
     def setup_args(self, parser):
         parser.add_argument("cmd", metavar = "CMD", nargs = "?",
@@ -70,8 +196,25 @@ class CommandApp(AppBase):
             self.execute_command("help")
             return 0
         
-        cmd = self.args.cmd or "default"
+        cmd = self.args.cmd or self.default_command or "default"
         return self.execute_command(cmd, self.args.cmd_args)
+    
+    #### CommandApp implementation ##################################
+    
+    def discover_commands(self):
+        result = {}
+        for attr in dir(self):
+            cmd = Command.from_method(getattr(self, attr))
+            if cmd is not None:
+                self.add_cmd(cmd)
+                result[cmd.name] = cmd
+        return result
+    
+    def add_cmd(self, cmd):
+        if cmd.name in self.commands:
+            raise ValueError("Command '%s' already registered." % (cmd.name, ))
+        self.commands[cmd.name] = cmd
+        self.cmd_map[cmd.name] = cmd
     
     def get_commands(self):
         result = []
@@ -82,33 +225,53 @@ class CommandApp(AppBase):
                 result.append((attr[4:], doc, ))
         return result
     
-    def execute_command(self, cmd, cmd_args = []):
-        if isinstance(cmd, basestring):
-            cmd = cmd.lower().replace("-", "_")
-            handler = getattr(self, "cmd_" + cmd, self.handle_unknown_command)
-        else:
-            handler = cmd
-        LOGGER.info("Executing command %r...", cmd)
-        return handler(cmd, cmd_args)
+    def execute_command(self, name, cmd_args = []):
+        try:
+            alt = self.cmd_map[name]
+        except KeyError:
+            return self.handle_unknown_command(name, cmd_args)
+        
+        if len(alt) > 1:
+            return self.handle_ambiguous_command(name, cmd_args)
+        
+        full_name, cmd = alt.pop()
+        
+        LOGGER.info("Executing command '%s'...", full_name)
+        return cmd.callback(name, cmd_args)
     
     def cmd_help(self, cmd, cmd_args):
         """Displays this help."""
         
-        print "Known Commands" 
-        print "==============" 
-        print
+        w = sys.stderr.write
+        w("Known Commands\n")
+
+        for cmd in self.commands.itervalues():
+            if len(self.cmd_map[cmd.name[:1]]) == 1:
+                w("\t[%s]%s\t%s\n" % (cmd.name[:1], cmd.name[1:], cmd.description, ))
+            else:
+                w("\t%s\t%s\n" % (cmd.name, cmd.description, ))
         
-        for cmd, doc in self.get_commands():
-            print "\t%s\t%s" % (cmd, doc, )
+        #for cmd, doc in self.get_commands():
+        #    w("\t%s\t%s\n" % (cmd, doc, ))
         
-        print
+        w("\n")
+    
+    def handle_ambiguous_command(self, name, args):
+        alt = self.cmd_map[name]
+        sys.stderr.write("Ambiguoug command: %s\n. Did you mean one of the following:\n" % (name, ))
+        sys.stderr.write("\t%s\n" % (", ".join([n for n, c in alt]), ))
     
     def handle_unknown_command(self, cmd, args):
-        # TODO: Implement a better handler for unknown commands.
-        print "Unknown command: %s %s" % (cmd, " ".join(args), )
+        sys.stderr.write("ERROR: Unknown command: %s %s\n\n" % (cmd, " ".join(args), ))
+        self.cmd_help(cmd, args)
 
 
 class DaemonControlApp(CommandApp):
+    """Represents a CLI application for daemon control (starting, stopping, querying). 
+    
+    Can be used as-is or extended.
+    """
+    
     def __init__(self, daemon):
         CommandApp.__init__(self, daemon.name)
         self.daemon = daemon
