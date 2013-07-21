@@ -12,6 +12,8 @@ import os.path as path
 import zipfile
 import logging
 
+import utils
+
 
 __all__ = ["Path", "File", "Directory", "ZipFile", "replace_ext", "executing_file", ]
 
@@ -49,6 +51,19 @@ def replace_ext(pth, extension = None):
 
 
 class Path(object):
+    """
+    Represents a file system path.
+
+    This class is mostly just an OOP wrapper around the functions in `os.path
+    <http://docs.python.org/2.7/library/os.path.html>`_.
+    
+    .. attribute:: value
+        
+        String value of the path.
+
+        :type: string
+    """
+    
     @property
     def is_file(self):
         return path.isfile(self.value)
@@ -157,8 +172,26 @@ class Path(object):
 
 
 class File(object):
+    """
+    Represents a file.
+    
+    .. attribute:: path
+        
+        Path to the file.
+
+        :type: :class:`Path`
+    """
+    
     @property
     def exists(self):
+        """
+        Calls `os.path.isfile
+        <http://docs.python.org/2.7/library/os.path.html#os.path.isfile>`_ to
+        determine whether the instance's `path` attribute points to an existing
+        file.
+        
+        :rtype: bool
+        """
         return path.isfile(self.path)
     
     @property
@@ -178,22 +211,67 @@ class File(object):
     def __str__(self):
         return str(self.path)
     
-    def open(self, mode = "r"):
+    def open(self, mode = "r", exc = True):
+        """
+        Opens a file and returns a `file object
+        <http://docs.python.org/library/stdtypes.html#bltin-file-objects>`_.
+        
+        :param string mode: the file access mode, defaults to read-only
+        :returns: a file object or None
+        
+        :throws: :class:`IOError`
+        """
         try:
-            return open(self.path.real, mode)
+            LOGGER.debug("Opening file %s...", str(self.path.real),
+                         extra = {"path": self.path,
+                                  "real": self.path.real,
+                                  "mode": mode, })
+            return open(str(self.path.real), mode)
         except Exception, e:
-            LOGGER.exception("Failed to open a file.", extra = {"path": str(self.path.real)})
+            LOGGER.exception("Failed to open a file %s.", str(self.path.real))
+            if exc:
+                raise
+        return None
     
-    def read(self):
+    def read(self, exc = True):
+        """
+        Reads the contents of the file and returns its contents.
+        
+        :param bool exc: if `True`, the method throws an exception on failure
+        :returns: contents of the file
+        :rtype: string or None
+        
+        :throws: :class:`IOError`
+        """
         c = None
         try:
-            f = self.open()
-            c = f.read()
-            f.close()
+            with self.open() as f:
+                c = f.read()
         except Exception, e:
-            LOGGER.exception(e, extra = {"path": str(self.path)})
-            return None
+            LOGGER.exception("Failed to open and read a file %s.", str(self.path.real))
+            if exc:
+                raise
         return c
+    
+    def write(self, contents, exc = True):
+        """
+        Writes a contents to the file.
+        
+        :param string contents: the content to be written to the file
+        :param bool exc: if `True`, the method throws an exception on failure
+        :returns: `True` on success, `False` otherwise
+        
+        :throws: :class:`IOError`
+        """
+        with self.open("w") as f:
+            try:
+                f.write(contents, exc = exc)
+            except Exception, e:
+                LOGGER.exception("Failed to write to a file %s.", str(self.path.real))
+                if exc:
+                    raise
+                return False
+        return True
     
     @classmethod
     def make(cls, pth):
@@ -209,6 +287,10 @@ class File(object):
 
 
 class Directory(File):
+    """
+    Represents a directory.
+    """
+    
     @property
     def exists(self):
         return path.isdir(self.path)
@@ -232,6 +314,16 @@ class Directory(File):
 
 
 class ZipFile(File):
+    """
+    Represents a zipped file.
+    
+    This is a wrapper around `zipfile
+    <http://docs.python.org/2/library/zipfile>`_.  The added value is that it
+    offers the same interface as the :class:`Directory` class to iterate
+    through it's contents.  This way, zip files can be transparently treated as
+    directories containing files (which they basically do).
+    """
+    
     EXTENSIONS = set(["zip", "jar", "egg", ])
     
     def __init__(self, pth):
