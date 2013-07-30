@@ -28,6 +28,13 @@ class Bundle(object):
         if Egg.is_egg(pth):
             return Egg(pth)
         
+        # If the path is a project file or a directory containing project file,
+        # return a project.
+        if pth.is_file and pth.base == Project.PROJECT_FILE:
+            return Project(pth)
+        if pth.is_dir and (pth + Project.PROJECT_FILE).is_file:
+            return Project(pth + Project.PROJECT_FILE)
+        
         # If the directory part of the path contains __init__.py file, assume
         # this is a package, otherwise it is a module (for now).
         in_package = False
@@ -45,6 +52,8 @@ class Bundle(object):
             
             # Otherwise, if we're still in a package, check for __init__.py
             # file and remember the package path if there is one.
+            if (parent + Project.PROJECT_FILE).is_file:
+                bundle_path = parent + Project.PROJECT_FILE
             if in_package and (parent + INIT_FILE).is_file:
                 bundle_path = parent
             else:
@@ -54,6 +63,8 @@ class Bundle(object):
         # wall as all subdirectories all the way back to the original path.
         # So, if bundle_path is a directory, the bundle is a package, otherwise
         # it is a module.
+        if bundle_path.is_file and bundle_path.base == Project.PROJECT_FILE:
+            return Project(bundle_path)
         if bundle_path.is_dir:
             return Package(bundle_path)
         return Module(bundle_path)
@@ -83,6 +94,14 @@ class Egg(Bundle):
                 return True
         
         return False
+
+
+class Project(Bundle):
+    PROJECT_FILE = "project.py"
+    SETUP_FILE   = "setup.py"
+    SOURCE_DIR   = "src"
+    BUILD_DIR    = "build"
+    DOC_DIR      = "doc"
 
 
 def main(argv = None):
