@@ -43,6 +43,29 @@ class TestPackage(unittest.TestCase):
         """Retrieving unset dependencies raises exception."""
         with self.assertRaises(injection.DependencyException):
             unknown = injection.get("unknown-dependency")
+    
+    def test_typical_usage(self):
+        """Test the typical usage as shown in the package docs."""
+        # Notice that ImportantClass doesn't ever mention the DefaultDelegate
+        # class.
+        class ImportantClass(object):
+            def do_stuff(self):
+                delegate_cls = injection.get("mypackage.ImportantClass.delegate")
+                if not delegate_cls:
+                    raise Exception
+                return delegate_cls().do_stuff()
+        
+        # And the DefaultDelegate class can provide its services without mentioning
+        # the ImportantClass.
+        @injection.provide("mypackage.ImportantClass.delegate", "default")
+        class DefaultDelegate(object):
+            def do_stuff(self):
+                return "Hello World!"
+        
+        # Yet, by default, the work together. 
+        obj = ImportantClass()
+        result = obj.do_stuff()
+        self.assertEqual(result, "Hello World!")
 
 
 class TestDefaultDependencyManager(unittest.TestCase):
@@ -65,8 +88,8 @@ class TestDefaultDependencyManager(unittest.TestCase):
         
         self.manager.select("unset-dependency", "named-alternative")
         
-        # Selecting named alternative shouldn't actually set
-        # the value of the dependency
+        # Selecting named alternative shouldn't actually set the value of the
+        # dependency
         with self.assertRaises(injection.DependencyException):
             value = self.manager.get("unset-dependency")
         
@@ -79,9 +102,9 @@ class TestDefaultDependencyManager(unittest.TestCase):
         alternative = object()
         self.manager.set("unset-dependency", alternative) 
         
-        # After the selecting a named alternative and subsequently
-        # providing value for that alternative, it should be obtainable
-        # simply by providing the dependency key.
+        # After selecting a named alternative and subsequently providing value
+        # for that alternative, it should be obtainable simply by providing the
+        # dependency key.
         self.assertIs(self.manager.get("unset-dependency"), dependency)
     
     def test_select_unset_b(self):
