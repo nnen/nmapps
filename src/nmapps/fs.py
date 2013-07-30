@@ -9,13 +9,14 @@ Author: Jan Milík <milikjan@fit.cvut.cz>
 import sys
 import os
 import os.path as path
+import shutil
 import zipfile
 import logging
 
 import utils
 
 
-__all__ = ["Path", "File", "Directory", "ZipFile", "replace_ext", "executing_file", ]
+__all__ = ["Path", "File", "Directory", "ZipFile", "ZipFileEntry", "replace_ext", "copy", "executing_file", ]
 
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +49,65 @@ def replace_ext(pth, extension = None):
     if extension is None:
         return left
     return left + "." + extension
+
+
+def copy(src_root, src, dst_root, dst = None):
+    """
+    Recursively copies files or directories. Sanely.
+    
+    Can copy file to dir (``a`` to ``b/``), file to file (``a`` to ``b``),
+    files in dir to dir (``a/*`` to ``b/``) or dir to dir (both ``a`` to ``b/``
+    and ``a`` to ``b/c``).
+    
+    **File To Dir**
+    
+    >>> copy("/file/dir", "file_name", "/dest/dir")
+    
+    **File To File**
+    
+    >>> copy("/file/dir", "file_name", "/dest/dir", "other_file_name")
+    
+    **Files In Dir To Dir**
+    
+    >>> copy("/file/dir", ".", "/dest/dir")
+    
+    **Dir To Dir**
+    
+    >>> copy("/dir/dir", "dir_name", "/dest/dir")
+    >>> copy("/dir/dir", "dir_name", "/dest/dir", "other_dir_name")
+    """
+    src_root = Path.make(src_root)
+    src = Path.make(src)
+    dst_root = Path.make(dst_root)
+    if dst:
+        dst = Path.make(dst)
+    
+    full_src = src_root + src
+    
+    if full_src.is_file:
+        if dst:
+            LOGGER.info("Copying file %s to file %s...", full_src, dst_root + dst)
+            shutil.copyfile(str(full_src), str(dst_root + dst))
+        else:
+            dst_dir = dst_root + src.dir
+            if not dst_dir.is_dir:
+                #LOGGER.info("Creating directory %s...", dst_dir)
+                os.makedirs(str(dst_dir))
+            LOGGER.info("Copying file %s to directory %s...", full_src, dst_dir)
+            shutil.copy(str(full_src), str(dst_dir))
+    elif full_src.is_dir:
+        if dst:
+            full_dst = dst_root + dst
+        else:
+            full_dst = dst_root + src
+        if not full_dst.is_dir:
+            #LOGGER.info("Creating directory %s...", full_dst)
+            os.makedirs(str(full_dst))
+        LOGGER.info("Copying files in %s to directory %s...", full_src, full_dst)
+        for dir_file in os.listdir(str(full_src)):
+            copy(full_src, dir_file, full_dst)
+    else:
+        raise ValueError
 
 
 class Path(object):
@@ -127,8 +187,7 @@ class Path(object):
         return "Path(%r)" % (self.value, )
     
     def __add__(self, right):
-        right = Path.make(right)
-        return Path(path.join(self.value, right.value))
+        return Path.join(self, right)
     
     def replace_ext(self, extension):
         return Path(replace_ext(self.value, extension))
@@ -138,6 +197,18 @@ class Path(object):
     
     def get_parts(self):
         return self.value.split(os.sep)
+    
+    def list_dir(self):
+        val = str(self)
+        return [Path.join(val, name) for name in os.listdir(val)]
+    
+    def iter_dir(self):
+        val = str(self)
+        for name in os.listdir(val):
+            yield Path.join(val, name)
+    
+    def list_names(self):
+        return os.listdir(str(self))
     
     def iter_parents(self):
         parts = self.real.get_parts()
@@ -156,7 +227,13 @@ class Path(object):
         sys.path.insert(1, self.abs)
     
     @classmethod
-    def make(cls, value):
+    def join(cls, *parts):
+        return Path.make(path.join(*(str(part) for part in parts)))
+    
+    @classmethod
+    def make(cls, value = None):
+        if value is None:
+            return Path.get_current()
         if isinstance(value, Path):
             return value
         value = getattr(value, "path", value)
@@ -341,10 +418,18 @@ class ZipFile(File):
             yield ZipFileEntry(self, info)
     
     def list(self):
+        """
+        :returns: a list of the zip file entries
+        :rype: list of :class:`ZipFileEntry` instances
+        """
         return list(self.iter_list())
 
 
 class ZipFileEntry(object):
+    """
+    Represents an entry (file) inside a zip archive.
+    """
+    
     def __init__(self, zip_file, info):
         self.zip_file = zip_file
         self.info = info

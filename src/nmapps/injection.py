@@ -43,13 +43,13 @@ Typical usage:
 
 import logging
 
-from .utils import UserException
+from .utils import NMAppsException, Callbacks
 
 
 LOGGER = logging.getLogger("nmapps.injection")
 
 
-class DependencyException(UserException):
+class DependencyException(NMAppsException):
     pass
 
 
@@ -57,19 +57,36 @@ class DependencyManager(object):
     def __str__(self):
         return "%s()" % (type(self).__name__, )
     
-    def set(self, key, value, *args, **kwargs):
-        pass
+    def set(self, key, value, name = None):
+        entry = self.get_entry(key)
+        entry.add(value, name)
     
-    def get(self, key, fallback = None):
-        if fallback is not None:
-            return fallback
+    def get_entry(self, key, throw = False):
         raise DependencyException()
     
-    def get_all(self, key):
-        return []
+    def get(self, key, fallback = None):
+        try:
+            entry = self.get_entry(key, True)
+            return entry.selected
+        except DependencyException:
+            if fallback is not None:
+                return fallback
+            raise
+        #if fallback is not None:
+        #    return fallback
+        #raise DependencyException()
     
-    def select(self, *args, **kwargs):
-        pass
+    def get_all(self, key):
+        entry = self.get_entry(key)
+        return entry.get_all()
+    
+    def get_dependency(self, key, name = None, all_ = False):
+        entry = self.get_entry(key)
+        return Dependency(entry, name, all_)
+    
+    def select(self, key, name):
+        entry = self.get_entry(key)
+        entry.select(name)
     
     def clear(self):
         pass
@@ -77,6 +94,25 @@ class DependencyManager(object):
 
 class NullDependencyManager(DependencyManager):
     pass
+
+
+class Dependency(object):
+    def __init__(self, entry, name = None, all_ = False):
+        self.entry = entry
+        self.name = name
+        self.all_ = all_
+        
+        self._generation = None
+        self._value = None
+    
+    @property
+    def value(self):
+        if self._generation is None or self._generation <> self.entry.generation:
+            if self.all_:
+                self._value = self.entry.get_all()
+            else:
+                self._value = self.entry.get(self.name)
+        return self._value
 
 
 class DependencyEntry(object):
@@ -89,28 +125,44 @@ class DependencyEntry(object):
         
         self.alternatives = []
         self.named = {}
+        
+        self.generation = 0
+        self.callbacks = Callbacks(owner = self)
     
     @property
     def selected(self):
+        value = self._selected
         if self.dirty:
-            if self.selected_name is not None:
-                try:
-                    self._selected = self.named[self.selected_name]
-                    return self._selected
-                except KeyError:
-                    LOGGER.warning("Selected named alternative %r for " \
-                                   "dependency %r could not be found, " \
-                                   "falling back to the last alternative.",
-                                   self.selected_name, self.key)
-            if len(self.alternatives) < 1:
-                LOGGER.error("There are no alternatives for dependency %r.", self.key)
-                raise DependencyException()
-            self._selected = self.alternatives[-1]
-            self.dirty = False
-        return self._selected
+            try:
+                value = self.get(self.selected_name)
+                self._selected = value
+                self.dirty = False
+            except DependencyException:
+                value = self.get()
+            
+            #if self.selected_name is not None:
+            #    try:
+            #        self._selected = self.named[self.selected_name]
+            #        return self._selected
+            #    except KeyError:
+            #        LOGGER.warning("Selected named alternative %r for " \
+            #                       "dependency %r could not be found, " \
+            #                       "falling back to the last alternative.",
+            #                       self.selected_name, self.key)
+            #if len(self.alternatives) < 1:
+            #    LOGGER.error("There are no alternatives for dependency %r.", self.key)
+            #    raise DependencyException()
+            #self._selected = self.alternatives[-1]
+            #self.dirty = False
+        return value
+    
+    def invalidate(self):
+        self.generation += 1
+        self.callbacks(self)
     
     def add(self, value, name = None):
         self.dirty = True
+        self.invalidate()
         
         self.alternatives.append(value)
         
@@ -120,8 +172,23 @@ class DependencyEntry(object):
             self.named[name] = value
     
     def select(self, name):
-        self.dirty = True
+        self.invalidate()
         self.selected_name = name
+    
+    def get(self, name = None):
+        if len(self.alternatives) < 1:
+            LOGGER.error("There are no alternatives for dependency %r.", self.key)
+            raise DependencyException()
+        if name is None:
+            return self.alternatives[-1]
+        try:
+            value = self.named[name]
+            return value
+        except KeyError:
+            LOGGER.warning("Named alternative %r for dependency %r could not "
+                           "be found.",
+                           name, self.key)
+            raise DependencyException()
     
     def get_all(self):
         return list(self.alternatives)
@@ -140,28 +207,34 @@ class DefaultDependencyManager(DependencyManager):
             self.entries[key] = entry
         return entry
     
-    def set(self, key, value, name = None):
-        entry = self.get_entry(key)
-        entry.add(value, name)
+    #def set(self, key, value, name = None):
+    #    entry = self.get_entry(key)
+    #    entry.add(value, name)
     
-    def select(self, key, name):
-        entry = self.get_entry(key)
-        entry.select(name)
+    #def select(self, key, name):
+    #    entry = self.get_entry(key)
+    #    entry.select(name)
     
-    def get(self, key, fallback = None):
-        if fallback is None:
-            entry = self.get_entry(key, True)
-            return entry.selected
-        else:
-            entry = self.get_entry(key)
-            try:
-                return entry.selected
-            except DependencyException:
-                return fallback
+    #def get(self, key, fallback = None):
+    #    try:
+    #        entry = self.get_entry(key, True)
+    #    except DependencyException:
+    #        if fallback is not None:
+    #            return fallback
+    #        raise
+    #    #if fallback is None:
+    #    #    entry = self.get_entry(key, True)
+    #    #    return entry.selected
+    #    #else:
+    #    #    entry = self.get_entry(key)
+    #    #    try:
+    #    #        return entry.selected
+    #    #    except DependencyException:
+    #    #        return fallback
     
-    def get_all(self, key):
-        entry = self.get_entry(key)
-        return entry.get_all()
+    #def get_all(self, key):
+    #    entry = self.get_entry(key)
+    #    return entry.get_all()
     
     def clear(self):
         self.entries.clear()
@@ -198,6 +271,10 @@ def get_all(key):
     :rtype: list
     """
     return MANAGER.get_all(key)
+
+
+def get_dependency(key, name = None, all_ = False):
+    return MANAGER.get_dependency(key, name, all_)
 
 
 def set(key, value, name = None):

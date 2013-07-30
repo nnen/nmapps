@@ -2,6 +2,15 @@
 
 
 import sys
+import logging
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+#####################################################################
+## OBJECT UTILITIES                                                ##
+#####################################################################
 
 
 def args_repr(*args, **kwargs):
@@ -42,63 +51,6 @@ def obj_repr(obj, *args, **kwargs):
     """
     cls_name = type(obj).__name__
     return "%s(%s)" % (cls_name, args_repr(*args, **kwargs), )
-
-
-class PrefixDict(object):
-    def __init__(self):
-        self.prefixes = {}
-    
-    def __len__(self):
-        return len(self.prefixes)
-    
-    def __iter__(self):
-        return iter(self.prefixes)
-    
-    def __getitem__(self, key):
-        return self.prefixes[key]
-    
-    def __setitem__(self, key, value):
-        key = str(key)
-        
-        for i in range(1, len(key) + 1):
-            try:
-                self.prefixes[key[:i]].add((key, value))
-            except KeyError:
-                self.prefixes[key[:i]] = set([(key, value), ])
-
-
-def decorate_exception(e):
-    if e is not None:
-        e.exc_info = sys.exc_info()
-
-
-class UserException(Exception):
-    def __init__(self, *args, **kwargs):
-        msg = kwargs.get("msg", None)
-        if msg is None:
-            Exception.__init__(self)
-        else:
-            Exception.__init__(self, msg)
-        
-        self.args = args
-        self.kwargs = kwargs
-        
-        self.exc_info = None
-        
-        self.inner_exception = kwargs.get("inner", None)
-        decorate_exception(self.inner_exception)
-    
-    def __str__(self):
-        if self.message is not None and len(self.message) > 0:
-            return self.message
-        return type(self).__name__
-    
-    def __repr__(self):
-        return "%s(%s)" % (
-            type(self).__name__,
-            ", ".join(["%r" % x for x in self.args] +
-                      ["%s = %r" % (key, name, ) for key, name in self.kwargs.iteritems()]),
-        )
 
 
 class Null(object):
@@ -202,6 +154,144 @@ class Null(object):
     def __str__(self):
         "Convert to a string and return it."
         return ""
+
+
+#####################################################################
+## COLLECTIONS                                                     ##
+#####################################################################
+
+
+class PrefixDict(object):
+    def __init__(self):
+        self.prefixes = {}
+    
+    def __len__(self):
+        return len(self.prefixes)
+    
+    def __iter__(self):
+        return iter(self.prefixes)
+    
+    def __getitem__(self, key):
+        return self.prefixes[key]
+    
+    def __setitem__(self, key, value):
+        key = str(key)
+        
+        for i in range(1, len(key) + 1):
+            try:
+                self.prefixes[key[:i]].add((key, value))
+            except KeyError:
+                self.prefixes[key[:i]] = set([(key, value), ])
+
+
+#####################################################################
+## EXCEPTIONS                                                      ##
+#####################################################################
+
+
+def decorate_exception(e):
+    if e is not None:
+        e.exc_info = sys.exc_info()
+
+
+class UserException(Exception):
+    def __init__(self, *args, **kwargs):
+        msg = kwargs.get("msg", None)
+        if msg is None:
+            Exception.__init__(self)
+        else:
+            Exception.__init__(self, msg)
+        
+        self.args = args
+        self.kwargs = kwargs
+        
+        self.exc_info = None
+        
+        self.inner_exception = kwargs.get("inner", None)
+        decorate_exception(self.inner_exception)
+    
+    def __str__(self):
+        if self.message is not None and len(self.message) > 0:
+            return self.message
+        return type(self).__name__
+    
+    def __repr__(self):
+        return "%s(%s)" % (
+            type(self).__name__,
+            ", ".join(["%r" % x for x in self.args] +
+                      ["%s = %r" % (key, name, ) for key, name in self.kwargs.iteritems()]),
+        )
+
+
+class NMAppsException(UserException):
+    pass
+
+
+#####################################################################
+## MISC                                                            ##
+#####################################################################
+
+
+class Callbacks(object):
+    def __init__(self, owner = None, name = None, error_callback = None):
+        self.callbacks = []
+        self.owner = owner
+        self.name = name
+        self.error_callback = error_callback
+    
+    def __len__(self):
+        return len(self.callbacks)
+    
+    def __getitem__(self, key):
+        return self.callbacks.__getitem__(key)
+    
+    def __iter__(self):
+        return iter(self.callbacks)
+    
+    def __call__(self, *args, **kwargs):
+        return self.invoke(args, kwargs)
+    
+    def add(self, callback):
+        self.callbacks.add(callback)
+    
+    def clear(self):
+        self.callbacks = []
+    
+    def invoke(self, args = None, kwargs = None):
+        args = args or ()
+        kwargs = kwargs or {}
+        
+        for callback in self:
+            try:
+                callback(*args, **kwargs)
+            except Exception, e:
+                self.handle_callback_error(callback, e)
+    
+    def collect(self, args = None, kwargs = None):
+        args = args or ()
+        kwargs = kwargs or {}
+        
+        result = []
+        
+        for callback in self:
+            try:
+                result.append(callback(*args, **kwargs))
+            except Exception, e:
+                self.handle_callback_error(callback, e)
+        
+        return result
+    
+    def handle_callback_error(self, callback, exception):
+        LOGGER.exception("Exception occured in callback %r in callbacks "
+                         "owned by %r, named %r.",
+                         callback, self.owner, self.name)
+        if self.error_callback:
+            try:
+                self.error_callback(self, callback, e)
+            except Exception, e:
+                LOGGER.exception("Ironically, exception occured in error callback %r "
+                                 "in callbacks owned by %r, named %r.",
+                                 self.error_callback, self.owner, self.name or "<unnamed>")
 
 
 if __name__ == '__main__':

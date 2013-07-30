@@ -44,6 +44,29 @@ class TestPackage(unittest.TestCase):
         with self.assertRaises(injection.DependencyException):
             unknown = injection.get("unknown-dependency")
     
+    def test_get_dependency(self):
+        dep = injection.get_dependency("some-dependency")
+        
+        with self.assertRaises(injection.DependencyException):
+            self.assertEqual(dep.value, None)
+        
+        injection.set("some-dependency", object())
+        
+        self.assertIsNotNone(injection.get("some-dependency"))
+    
+    def test_get_dependency_all(self):
+        dep = injection.get_dependency("some-dependency", all_ = True)
+        
+        self.assertEqual(len(dep.value), 0)
+        
+        injection.set("some-dependency", object())
+        
+        self.assertEqual(len(dep.value), 1)
+        
+        injection.set("some-dependency", object())
+        
+        self.assertEqual(len(dep.value), 2)
+    
     def test_typical_usage(self):
         """Test the typical usage as shown in the package docs."""
         # Notice that ImportantClass doesn't ever mention the DefaultDelegate
