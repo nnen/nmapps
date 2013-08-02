@@ -5,6 +5,21 @@ import unittest
 import nmapps.utils as utils
 
 
+class TestRegExReplacer(unittest.TestCase):
+    def test_simple(self):
+        rep = utils.RegExReplacer("abc")
+        self.assertEqual(rep.safe_replace("abc hello abc worldabc"),
+                         "abc hello abc worldabc")
+    
+    def test_overriden(self):
+        class Overriden(utils.RegExReplacer):
+            def replace_occurence(self, matcher, index):
+                return "x"
+        rep = Overriden("abc", error_value = "error")
+        self.assertEqual(rep.safe_replace("abc hello abc worldabc"),
+                         "x hello x worldx")
+
+
 class TestArgsRepr(unittest.TestCase):
     def test_no_arguments(self):
         self.assertEqual(utils.args_repr(), "")

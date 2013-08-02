@@ -3,9 +3,71 @@
 
 import sys
 import logging
+import re
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+#####################################################################
+## STRING UTILITIES                                                ##
+#####################################################################
+
+
+class RegExReplacer(object):
+    def __init__(self, pattern, callback = None, error_value = ""):
+        if isinstance(pattern, basestring):
+            pattern = re.compile(pattern)
+        self.pattern = pattern
+        self.callback = callback
+        self.error_value = error_value
+    
+    def replace(self, input):
+        last_end = 0
+        result = ""
+        for index, m in enumerate(self.pattern.finditer(input)):
+            start, end = m.span()
+            result += input[last_end:start]
+            result += self.replace_occurence(m, index)
+            last_end = end
+        if last_end < len(input):
+            result += input[last_end:]
+        return result
+    
+    def safe_replace(self, input):
+        last_end = 0
+        result = ""
+        for index, m in enumerate(self.pattern.finditer(input)):
+            start, end = m.span()
+            result += input[last_end:start]
+            try:
+                result += str(self.replace_occurence(m, index))
+            except Exception, e:
+                result += self.handle_replace_error(m, index, e)
+            last_end = end
+        if last_end < len(input):
+            result += input[last_end:]
+        return result
+    
+    def handle_replace_error(self, match, index, e):
+        if e is not Null:
+            LOGGER.exception("Exception occured while replacing a regex match \"%s\".",
+                             match.group(0))
+        try:
+            return self.replace_error(match, index, e)
+        except Exception, e2:
+            LOGGER.exception("Exception occured in exception handler while "
+                             "replacing a regex match \"%s\".",
+                             match.group(0))
+            return ""
+    
+    def replace_occurence(self, matcher, index):
+        if self.callback:
+            return self.callback(matcher, index)
+        return matcher.group(0)
+    
+    def replace_error(self, match, index, e):
+        return self.error_value
 
 
 #####################################################################
