@@ -1,6 +1,6 @@
-include doc/conf.py
 recursive-include doc *.rst
 prune doc/html/.doctrees
+include doc/conf.py
 exclude doc/html/.buildinfo
 include LICENSE
 include README
