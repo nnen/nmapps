@@ -289,6 +289,10 @@ class NMAppsException(UserException):
     pass
 
 
+class NotSupportedError(NMAppsException):
+    pass
+
+
 #####################################################################
 ## MISC                                                            ##
 #####################################################################
