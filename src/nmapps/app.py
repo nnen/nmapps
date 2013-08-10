@@ -10,12 +10,19 @@ import os.path as path
 import errno
 import argparse
 import logging
+import inspect
 
 import utils
 import fs
+import injection
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+#####################################################################
+## BASIC APPS
+#####################################################################
 
 
 class AbstractFile(object):
@@ -48,7 +55,7 @@ class File(AbstractFile):
     def __init__(self, path):
         AbstractFile.__init__(self)
         self.path = fs.Path.make(path)
-
+        
         self._input = None
         self._output = None
     
@@ -106,6 +113,60 @@ class AppBase(object):
         raise NotImplementedError()
 
 
+#####################################################################
+## COMMAND APPS
+#####################################################################
+
+
+CMD_SEP = ":"
+
+
+def split_cmd(cmd):
+    """Splits qualified command name into parts.
+    
+    Example:
+    
+    >>> split_cmd("some:command:name")
+    ('some', 'command', 'name')
+    >>> split_cmd(('other', 'command', 'name'))
+    ('other', 'command', 'name')
+    >>> split_cmd(['other', 'command', 'name'])
+    ('other', 'command', 'name')
+    >>> split_cmd(None)
+    ()
+    
+    """
+    if cmd is None:
+        return tuple()
+    if isinstance(cmd, basestring):
+        return tuple(cmd.split(CMD_SEP))
+    return tuple(cmd)
+
+
+def join_cmd(cmd):
+    """Joins parts of a command name back to qualified name.
+    
+    Example:
+    
+    >>> join_cmd(('some', 'command', 'name'))
+    'some:command:name'
+    >>> join_cmd(['some', 'command', 'name'])
+    'some:command:name'
+    >>> join_cmd("other:command:name")
+    'other:command:name'
+    """
+    if isinstance(cmd, basestring):
+        return cmd
+    return CMD_SEP.join(cmd)
+
+
+def cmd_to_str(cmd):
+    value = join_cmd(cmd)
+    if len(value) == 0:
+        return "<none>"
+    return "`%s`" % (value, )
+
+
 class Command(object):
     """Represents a :class:`CommandApp` command.
     """
@@ -118,11 +179,16 @@ class Command(object):
         self.description = desc
         self.callback = callback
     
+    def __repr__(self):
+        return utils.obj_repr(self, self.name)
+    
     def execute(self, *args, **kwargs):
         self.callback(*args, **kwargs)
     
     @classmethod
     def decorate(cls, name, desc = None):
+        # Decorator has been called directory on the function/method without
+        # arguments.
         if hasattr(name, "im_func") or hasattr(name, "func_code"):
             setattr(name, cls.DECORATOR_ATTR, {
                 "name": cls.method_name_to_cmd(name.__name__),
@@ -130,6 +196,7 @@ class Command(object):
             })
             return name
         
+        # Decorator has been called with arguments.
         def decorator(fn):
             setattr(fn, cls.DECORATOR_ATTR, {
                 "name": name,
@@ -156,6 +223,16 @@ class Command(object):
         cmd = method.__name__[len(cls.METHOD_PREFIX):]
         desc = getattr(method, "__doc__", None)
         return cls(cmd, desc, method)
+    
+    @classmethod
+    def reflect(cls, obj):
+        result = []
+        for attr_name, attr in ((n, getattr(obj, n)) for n in dir(obj)):
+            if inspect.isroutine(attr):
+                cmd = cls.from_method(attr)
+                if cmd is not None:
+                    result.append(cmd)
+        return result
 
 
 appcmd = Command.decorate
@@ -175,11 +252,14 @@ class CommandApp(AppBase):
     def __init__(self, basename = None):
         AppBase.__init__(self, basename)
         
-        self.commands = {}
-        self.cmd_map = utils.PrefixDict()
-        self.default_command = None
+        #self.commands = {}
+        #self.cmd_map = utils.PrefixDict()
+        #self.default_command = None
+        #
+        #self.discover_commands()
         
-        self.discover_commands()
+        self.root_ctrl = CommandController("root", (self, ))
+        self.initialize_root_controller(self.root_ctrl)
     
     #### AppBase implementation #####################################
     
@@ -196,10 +276,17 @@ class CommandApp(AppBase):
             self.execute_command("help")
             return 0
         
-        cmd = self.args.cmd or self.default_command or "default"
+        #cmd = self.args.cmd or self.default_command or "default"
+        cmd = self.args.cmd
         return self.execute_command(cmd, self.args.cmd_args)
     
     #### CommandApp implementation ##################################
+    
+    def initialize_root_controller(self, ctrl):
+        key = self.__module__ + "." + self.__class__.__name__ + ".controller"
+        controllers = injection.get_all(key)
+        for child in controllers:
+            ctrl.add_child(child)
     
     def discover_commands(self):
         result = {}
@@ -225,19 +312,24 @@ class CommandApp(AppBase):
                 result.append((attr[4:], doc, ))
         return result
     
-    def execute_command(self, name, cmd_args = []):
-        try:
-            alt = self.cmd_map[name]
-        except KeyError:
-            return self.handle_unknown_command(name, cmd_args)
+    def execute_command(self, name, cmd_args = None):
+        full_name = split_cmd(name)
+        if cmd_args is None:
+            cmd_args = []
+        return self.root_ctrl.execute_command(self, full_name, (), cmd_args)
         
-        if len(alt) > 1:
-            return self.handle_ambiguous_command(name, cmd_args)
-        
-        full_name, cmd = alt.pop()
-        
-        LOGGER.info("Executing command '%s'...", full_name)
-        return cmd.callback(name, cmd_args)
+        #try:
+        #    alt = self.cmd_map[name]
+        #except KeyError:
+        #    return self.handle_unknown_command(name, cmd_args)
+        #
+        #if len(alt) > 1:
+        #    return self.handle_ambiguous_command(name, cmd_args)
+        #
+        #full_name, cmd = alt.pop()
+        #
+        #LOGGER.info("Executing command '%s'...", full_name)
+        #return cmd.callback(name, cmd_args)
     
     def cmd_help(self, cmd, cmd_args):
         """Displays this help."""
@@ -264,6 +356,206 @@ class CommandApp(AppBase):
     def handle_unknown_command(self, cmd, args):
         sys.stderr.write("ERROR: Unknown command: %s %s\n\n" % (cmd, " ".join(args), ))
         self.cmd_help(cmd, args)
+
+
+class CommandController(object):
+    NAME = "cmd"
+    
+    def __init__(self, name = None, cmd_objs = None):
+        self.name = name or self.NAME
+        
+        self.children = utils.PrefixDict()
+        for child in self.initialize_children():
+            self.add_child(*child)
+        self.fallback_controller = None
+        
+        self.commands = utils.PrefixDict()
+        commands = self.initialize_commands(cmd_objs)
+        for cmd in commands:
+            self.add_cmd(cmd)
+        self.default_command_name = "default"
+    
+    def __repr__(self):
+        return utils.obj_repr(self, self.name)
+    
+    def initialize_children(self):
+        return []
+    
+    def initialize_commands(self, cmd_objs = None):
+        result = []
+        result += CommandHandler.reflect(self)
+        if cmd_objs is not None:
+            for obj in cmd_objs:
+                result += CommandHandler.reflect(obj)
+        return result
+    
+    def add_child(self, controller, name = None):
+        if name is None:
+            name = controller.name
+        self.children[name] = controller
+    
+    def add_cmd(self, cmd):
+        LOGGER.debug("Adding command \"%s\" to controller \"%s\"...", cmd.name, self.name)
+        self.commands[cmd.name] = cmd
+    
+    def get_child_controller(self, name, context):
+        """Returns a child controller for a given name.
+        """
+        try:
+            alternatives = self.children[name]
+        except KeyError:
+            return self.get_unknown_child_controller(name, context)
+        
+        if len(alternatives) > 1:
+            raise ValueError # TODO: Raise better exception - something like AmbiguousCommandException
+        
+        name, value = alternatives.pop()
+        return value, (name, )
+    
+    def get_unknown_child_controller(self, name, context):
+        #return name, self.fallback_controller or UNKNOWN_CONTROLLER
+        return None, None
+    
+    def route_command(self, name, context = None):
+        if context is None:
+            context = tuple()
+        
+        if len(name) > 0:
+            child, child_name = self.get_child_controller(name[0], context)
+            if child is not None:
+                return child.route_command(name[1:], context + child_name)
+        
+        return self, name, context
+    
+    def get_command(self, name, context):
+        # TODO: Fix this, the rest of the name is ignored.
+        assert isinstance(name, tuple)
+        if isinstance(name, tuple):
+            if len(name) < 1:
+                name = (self.default_command_name, )
+            simple_name = name[-1]
+        
+        try:
+            alternatives = self.commands[simple_name]
+        except KeyError:
+            return self.get_unknown_command(name, context)
+        
+        if len(alternatives) > 1:
+            raise ValueError # TODO: Raise better exception - something like AmbiguousCommandException
+        
+        cmd_name, command = alternatives.pop()
+        return command, cmd_name, context + (cmd_name, )
+    
+    def get_unknown_command(self, name, context):
+        return UNKNOWN_COMMAND_HANDLER, name, context + name
+    
+    def execute_command(self, app, name, context, arguments = None):
+        ctrl, cmd_name, ctrl_name = self.route_command(name, context)
+        command, cmd_simple_name, cmd_full_name = ctrl.get_command(cmd_name, ctrl_name)
+        LOGGER.debug("Routing command %s to controller %r, command %s.", cmd_to_str(context + name), ctrl, cmd_to_str(cmd_full_name))
+        #LOGGER.debug("Getting command %r from controller %r: %r.", cmd_simple_name, ctrl, command)
+        
+        LOGGER.info("Executing command %s...", cmd_to_str(cmd_full_name))
+        return command.execute(app, ctrl, name, cmd_full_name, arguments)
+
+
+class CommandHandler(object):
+    """Represents a :class:`CommandApp` command handler.
+    """
+    
+    METHOD_PREFIX = "cmd_"
+    DECORATOR_ATTR = "__app_cmd__"
+    
+    def __init__(self, name, desc = None, callback = None):
+        self.name = name
+        self.description = desc
+        self.callback = callback
+    
+    def __repr__(self):
+        return utils.obj_repr(self, self.name)
+    
+    def execute(self, *args, **kwargs):
+        self.callback(*args, **kwargs)
+    
+    @classmethod
+    def decorate(cls, name, desc = None):
+        # Decorator has been called directory on the function/method without
+        # arguments.
+        if hasattr(name, "im_func") or hasattr(name, "func_code"):
+            setattr(name, cls.DECORATOR_ATTR, {
+                "name": cls.method_name_to_cmd(name.__name__),
+                "desc": name.__doc__,
+            })
+            return name
+        
+        # Decorator has been called with arguments.
+        def decorator(fn):
+            setattr(fn, cls.DECORATOR_ATTR, {
+                "name": name,
+                "desc": desc or fn.__doc__,
+            })
+            return fn
+        return decorator
+    
+    @classmethod
+    def method_name_to_cmd(cls, name):
+        if name.startswith(cls.METHOD_PREFIX):
+            return name[len(cls.METHOD_PREFIX):]
+        return name
+    
+    @classmethod
+    def from_method(cls, method):
+        # Check if the method is decorated and use the decorator if it is.
+        dec = getattr(method, cls.DECORATOR_ATTR, None)
+        if dec is not None:
+            return cls(dec["name"], dec["desc"], method)
+        
+        # Check if the method has magical name. If it doesn't, stop trying.
+        if not (hasattr(method, "__name__") and method.__name__.startswith(cls.METHOD_PREFIX)):
+            return None
+        
+        cmd = method.__name__[len(cls.METHOD_PREFIX):]
+        desc = getattr(method, "__doc__", None)
+        return cls(cmd, desc, method)
+    
+    @classmethod
+    def reflect(cls, obj):
+        result = []
+        for attr_name, attr in ((n, getattr(obj, n)) for n in dir(obj)):
+            if inspect.isroutine(attr):
+                cmd = cls.from_method(attr)
+                if cmd is not None:
+                    result.append(cmd)
+        return result
+
+
+class UnknownCommandHandler(CommandHandler):
+    def __init__(self):
+        CommandHandler.__init__(self, "unknown")
+    
+    def execute(self, app, ctrl, name, full_name, arguments):
+        if full_name[-1] == ctrl.default_command_name:
+            sys.stderr.write("ERROR: Default command undefined.\n")
+        else:
+            sys.stderr.write("ERROR: Unknown command: %s\n" % (":".join(full_name), ))
+        return 1
+
+UNKNOWN_COMMAND_HANDLER = UnknownCommandHandler()
+
+
+class UnknownController(CommandController):
+    def get_child_controller(self, name, full_name):
+        return name, self
+    
+    def get_command(self, name, full_name):
+        return UnknownCommand()
+
+UNKNOWN_CONTROLLER = UnknownController()
+
+
+#####################################################################
+## DAEMON APPS
+#####################################################################
 
 
 class DaemonControlApp(CommandApp):

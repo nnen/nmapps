@@ -150,16 +150,16 @@ class UtilApp(app.CommandApp):
         app.CommandApp.setup_args(self, parser)
         parser.add_argument("-v", "--version", action = "store_true")
     
-    def cmd_version(self, cmd, cmd_args):
+    def cmd_version(self, app, ctrl, name, full_name, cmd_args):
         """Print out nmapps package version."""
         print "nmapps %s" % (__version__, )
     
-    def cmd_which(self, cmd, cmd_args):
+    def cmd_which(self, app, ctrl, name, full_name, cmd_args):
         """Print out the bundle the application is running from."""
         b = bundle.get_bundle(__file__)
         sys.stderr.write("Bundle: %r\n" % (b, ))
     
-    def cmd_bundle(self, cmd, cmd_args):
+    def cmd_bundle(self, app, ctrl, name, full_name, cmd_args):
         """
         Try to find the bundle the current directory or the specified paths
         are in.
@@ -170,12 +170,12 @@ class UtilApp(app.CommandApp):
             bndl = bundle.get_bundle(arg)
             sys.stderr.write(repr(bndl) + "\n")
     
-    def cmd_eggimp(self, cmd, cmd_args):
+    def cmd_eggimp(self, app, ctrl, name, full_name, cmd_args):
         """Copy the eggimp.py script to the current directory."""
         path = fs.Path(__file__).dir + "eggimp.py"
         shutil.copyfile(str(path.abs), str(fs.Path("eggimp.py").abs))
     
-    def cmd_tpl(self, cmd, cmd_args):
+    def cmd_tpl(self, app, ctrl, name, full_name, cmd_args):
         if len(cmd_args) < 1:
             sys.stderr.write("Name of a template expected.\n")
             return 1
@@ -186,6 +186,12 @@ class UtilApp(app.CommandApp):
             sys.stderr.write("Template \"%s\" could not be found. The template path is:\n%s\n" % (tpl_name, "\n".join([str(p) for p in Template.PATH])))
             return 1
         tpl.instantiate()
+
+
+@injection.factory("nmapps.tool.UtilApp.controller", None, "test")
+class TestCtrl(app.CommandController):
+    def cmd_test(self, app, ctrl, name, full_name, cmd_args):
+        print "This is TestCtrl command controller."
 
 
 def main():
