@@ -226,6 +226,7 @@ class Null(object):
 class PrefixDict(object):
     def __init__(self):
         self.prefixes = {}
+        self.values = {}
     
     def __len__(self):
         return len(self.prefixes)
@@ -240,10 +241,17 @@ class PrefixDict(object):
         key = str(key)
         
         for i in range(1, len(key) + 1):
+            self.values[key] = value
             try:
                 self.prefixes[key[:i]].add((key, value))
             except KeyError:
                 self.prefixes[key[:i]] = set([(key, value), ])
+    
+    def iteritems(self):
+        return self.values.iteritems()
+    
+    def itervalues(self):
+        return self.values.itervalues()
 
 
 #####################################################################

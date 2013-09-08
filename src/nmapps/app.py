@@ -317,36 +317,6 @@ class CommandApp(AppBase):
         if cmd_args is None:
             cmd_args = []
         return self.root_ctrl.execute_command(self, full_name, (), cmd_args)
-        
-        #try:
-        #    alt = self.cmd_map[name]
-        #except KeyError:
-        #    return self.handle_unknown_command(name, cmd_args)
-        #
-        #if len(alt) > 1:
-        #    return self.handle_ambiguous_command(name, cmd_args)
-        #
-        #full_name, cmd = alt.pop()
-        #
-        #LOGGER.info("Executing command '%s'...", full_name)
-        #return cmd.callback(name, cmd_args)
-    
-    def cmd_help(self, cmd, cmd_args):
-        """Displays this help."""
-        
-        w = sys.stderr.write
-        w("Known Commands\n")
-
-        for cmd in self.commands.itervalues():
-            if len(self.cmd_map[cmd.name[:1]]) == 1:
-                w("\t[%s]%s\t%s\n" % (cmd.name[:1], cmd.name[1:], cmd.description, ))
-            else:
-                w("\t%s\t%s\n" % (cmd.name, cmd.description, ))
-        
-        #for cmd, doc in self.get_commands():
-        #    w("\t%s\t%s\n" % (cmd, doc, ))
-        
-        w("\n")
     
     def handle_ambiguous_command(self, name, args):
         alt = self.cmd_map[name]
@@ -373,7 +343,7 @@ class CommandController(object):
         commands = self.initialize_commands(cmd_objs)
         for cmd in commands:
             self.add_cmd(cmd)
-        self.default_command_name = "default"
+        self.default_command_name = "help"
     
     def __repr__(self):
         return utils.obj_repr(self, self.name)
@@ -457,6 +427,24 @@ class CommandController(object):
         
         LOGGER.info("Executing command %s...", cmd_to_str(cmd_full_name))
         return command.execute(app, ctrl, name, cmd_full_name, arguments)
+    
+    def cmd_help(self, app, ctrl, name, full_name, cmd_args):
+        """Displays this help."""
+        
+        w = sys.stderr.write
+        w("Commands:\n")
+        
+        for cmd in self.commands.itervalues():
+            #if len(self.cmd_map[cmd.name[:1]]) == 1:
+            #    w("\t[%s]%s\t%s\n" % (cmd.name[:1], cmd.name[1:], cmd.description, ))
+            #else:
+            #    w("\t%s\t%s\n" % (cmd.name, cmd.description, ))
+            desc = ""
+            if cmd.description is not None:
+                desc = cmd.description.strip()
+            w("\t%s\t%s\n" % (cmd.name, desc, ))
+        
+        w("\n")
 
 
 class CommandHandler(object):
