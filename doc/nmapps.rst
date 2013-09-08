@@ -65,6 +65,14 @@ nmapps Package
     :undoc-members:
     :show-inheritance:
 
+:mod:`writers` Module
+-------------------
+
+.. automodule:: nmapps.writers
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 Subpackages
 -----------
 

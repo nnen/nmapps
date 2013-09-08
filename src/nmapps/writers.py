@@ -21,23 +21,74 @@ def obj_repr(instance, *args, **kwargs):
     return "%s(%s)" % (type(instance).__name__, ", ".join(args_list), )
 
 
-class HTMLWriter(object):
+class Writer(object):
     def __init__(self, output = None):
         if output is None:
             output = StringIO.StringIO()
         self.output = output
-        self.tag_stack = []
+        self.indent_stack = []
     
     def __str__(self):
-        getvalue = getattr(self.output, "getvalue")
+        getvalue = getattr(self.output, None)
         if getvalue:
             return getvalue()
         return repr(self)
     
-    def _format_style_attr(self, value):
+    def __getattr__(self, name):
+        return getattr(self.output, name)
+    
+    def write_indent(self):
+        if len(self.indent_stack) > 0:
+            self.output.write(self.indent_stack[-1])
+    
+    def indent(self, value = "\t"):
+        if len(self.indent_stack) > 0:
+            self.indent_stack.append(self.indent_stack[-1] + value)
+        else:
+            self.indent_stack.append(value)
+        
+        class IndentGuard(object):
+            def __init__(self, writer):
+                self.writer = writer
+            def __enter__(self):
+                pass
+            def __exit__(self, exc_type, exc_value, traceback):
+                if exc_type is None:
+                    self.writer.unindent()
+        
+        return IndentGuard(self)
+    
+    def unindent(self):
+        if len(self.indent_stack) > 0:
+            self.indent_stack.pop()
+
+
+class HTMLWriter(Writer):
+    def __init__(self, output = None):
+        Writer.__init__(self, output)
+        self.tag_stack = []
+    
+    def __str__(self):
+        getvalue = getattr(self.output, None)
+        if getvalue:
+            return getvalue()
+        return repr(self)
+    
+    def format_css_style(self, value):
         if isinstance(value, dict):
             result = "; ".join(["%s: %s" % (k, v, ) for k, v in value.iteritems()])
         return str(value)
+
+    def format_tag_attrs(self, attrs):
+        if "style" in attrs:
+            attrs["style"] = self.format_css_style(attrs["style"])
+        attributes = {}
+        for k, v in attrs.iteritems():
+            if k.endswith("_"):
+                attributes[k[:-1]] = v
+            else:
+                attributes[k] = v
+        return " ".join(["%s=\"%s\"" % (k, v, ) for k, v in attributes.iteritems()])
     
     def tag(self, name, value = None, **kwargs):
         self.tag_stack.append(name)
@@ -48,18 +99,22 @@ class HTMLWriter(object):
                 self.output.write("<%s>" % (t, ))
         
         if len(kwargs) > 0:
-            if "style" in kwargs:
-                kwargs["style"] = self._format_style_attr(kwargs["style"])
-            attributes = {}
-            for k, v in kwargs.iteritems():
-                if k.endswith("_"):
-                    attributes[k[:-1]] = v
-                else:
-                    attributes[k] = v
             self.output.write("<%s %s>" % (
                 name,
-                " ".join(["%s=\"%s\"" % (k, v, ) for k, v in attributes.iteritems()]),
+                self.format_tag_attrs(kwargs),
             ))
+            #if "style" in kwargs:
+            #    kwargs["style"] = self.format_css_style(kwargs["style"])
+            #attributes = {}
+            #for k, v in kwargs.iteritems():
+            #    if k.endswith("_"):
+            #        attributes[k[:-1]] = v
+            #    else:
+            #        attributes[k] = v
+            #self.output.write("<%s %s>" % (
+            #    name,
+            #    " ".join(["%s=\"%s\"" % (k, v, ) for k, v in attributes.iteritems()]),
+            #))
         else:
             self.output.write("<%s>" % (name, ))
         
