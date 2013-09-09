@@ -66,7 +66,7 @@ nmapps Package
     :show-inheritance:
 
 :mod:`writers` Module
--------------------
+---------------------
 
 .. automodule:: nmapps.writers
     :members:
