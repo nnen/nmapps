@@ -43,29 +43,42 @@ class TestPrefixDict(unittest.TestCase):
         prefd["hell"]  = 1
         prefd["abc"]   = 2
     
+    def _test_getitem(self, prefd, key, value, alt_len):
+        exact, alt = prefd[key]
+        self.assertEqual(exact, value)
+        self.assertEqual(len(alt), alt_len)
+    
     def test_getitem(self):
         prefd = utils.PrefixDict()
         prefd["hello"] = 0
         prefd["hell"]  = 1
         prefd["abc"]   = 2
         
-        self.assertEqual(1, len(prefd["hello"]))
-        self.assertEqual(2, len(prefd["hell"]))
-        self.assertEqual(2, len(prefd["hel"]))
-        self.assertEqual(2, len(prefd["he"]))
-        self.assertEqual(2, len(prefd["h"]))
-        self.assertEqual(1, len(prefd["abc"]))
-        self.assertEqual(1, len(prefd["ab"]))
-        self.assertEqual(1, len(prefd["a"]))
+        self._test_getitem(prefd, "hello", 0,    0)
+        self._test_getitem(prefd, "hell",  1,    1)
+        self._test_getitem(prefd, "hel",   None, 2)
+        self._test_getitem(prefd, "he",    None, 2)
+        self._test_getitem(prefd, "h",     None, 2)
+        self._test_getitem(prefd, "abc",   2,    0)
+        self._test_getitem(prefd, "ab",    None, 1)
+        self._test_getitem(prefd, "a",     None, 1)
+        #self.assertEqual(1, len(prefd["hello"]))
+        #self.assertEqual(2, len(prefd["hell"]))
+        #self.assertEqual(2, len(prefd["hel"]))
+        #self.assertEqual(2, len(prefd["he"]))
+        #self.assertEqual(2, len(prefd["h"]))
+        #self.assertEqual(1, len(prefd["abc"]))
+        #self.assertEqual(1, len(prefd["ab"]))
+        #self.assertEqual(1, len(prefd["a"]))
         
-        self.assertIn("hello", prefd)
-        self.assertIn("hell",  prefd)
-        self.assertIn("hel",   prefd)
-        self.assertIn("he",    prefd)
-        self.assertIn("h",     prefd)
-        self.assertIn("abc",   prefd)
-        self.assertIn("ab",    prefd)
-        self.assertIn("a",     prefd)
+        #self.assertIn("hello", prefd)
+        #self.assertIn("hell",  prefd)
+        #self.assertIn("hel",   prefd)
+        #self.assertIn("he",    prefd)
+        #self.assertIn("h",     prefd)
+        #self.assertIn("abc",   prefd)
+        #self.assertIn("ab",    prefd)
+        #self.assertIn("a",     prefd)
 
 
 class TestUserException(unittest.TestCase):

@@ -235,17 +235,37 @@ class PrefixDict(object):
         return iter(self.prefixes)
     
     def __getitem__(self, key):
-        return self.prefixes[key]
+        key = str(key)
+        
+        try:
+            return key, self.values[key]
+        except KeyError:
+            pass
+        
+        alt = self.prefixes[key]
+        if len(alt) == 1:
+            return list(alt)[0]
+        
+        raise KeyError
     
     def __setitem__(self, key, value):
         key = str(key)
+        self.values[key] = value
         
-        for i in range(1, len(key) + 1):
-            self.values[key] = value
+        for i in range(1, len(key)):
             try:
                 self.prefixes[key[:i]].add((key, value))
             except KeyError:
                 self.prefixes[key[:i]] = set([(key, value), ])
+    
+    def get(self, key):
+        key = str(key)
+        
+        exact = self.values.get(key, None)
+        try:
+            return exact, self.prefixes[key]
+        except KeyError:
+            return exact, self.prefixes.setdefault(key, set())
     
     def iteritems(self):
         return self.values.iteritems()

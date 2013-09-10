@@ -167,6 +167,41 @@ def cmd_to_str(cmd):
     return "`%s`" % (value, )
 
 
+class CmdName(object):
+    def __init__(self, name, namespace = None):
+        self.name      = split_cmd(name)
+        self.namespace = split_cmd(namespace)
+    
+    def __repr__(self):
+        return utils.obj_repr(self, self.name, self.namespace)
+    
+    def __str__(self):
+        return join_cmd(self.full)
+    
+    def __len__(self):
+        return len(self.name)
+
+    def __iter__(self):
+        return iter(self.name)
+    
+    def __getitem__(self, key):
+        return self.name.__getitem__(key)
+    
+    @property
+    def is_empty(self):
+        return len(self.name) + len(self.namespace) == 0
+    
+    @property
+    def full(self):
+        return self.namespace + self.name
+    
+    @classmethod
+    def make(cls, value, **kwargs):
+        if isinstance(value, cls):
+            return value
+        return CmdName(value, **kwargs)
+
+
 class Command(object):
     """Represents a :class:`CommandApp` command.
     """
@@ -328,6 +363,73 @@ class CommandApp(AppBase):
         self.cmd_help(cmd, args)
 
 
+class CmdController(object):
+    # Basic Protocol ##########################################
+    
+    def route(self, name):
+        name = CmdName.make(name)
+        return UnknownController(name)
+    
+    def execute(self, app, name, arguments = None):
+        raise NotImplementedError
+    
+    # Other ###################################################
+
+
+class SimpleController(CmdController):
+    def __init__(self, name, handler):
+        CmdController.__init__(self)
+        self.name = name
+        self.handler = handler
+    
+    def execute(self, app, name, arguments = None):
+        if self.handler is None:
+            UnknownController(self.name).execute(app, name, arguments)
+        return self.handler(app, name, namespace, arguments)
+
+
+class BasicController(SimpleController):
+    def __init__(self, name, handler = None):
+        SimpleController.__init__(self, name, handler)
+        
+        self.default_cmd = None
+        self.children = utils.PrefixDict()
+    
+    #### Basic Protocol #############################################
+    
+    def route(self, name):
+        name = CmdName.make(name)
+        
+        if len(name) < 1:
+            return self, name
+        
+        child_name, child = self.children[name[0]]
+        if child is not None:
+            return child.route_command(name[1:])
+        
+        return UnknownController(name)
+    
+    def execute(self, app, name, arguments = None):
+        if self.default_cmd is not None:
+            return self.default_cmd.execute(app, name, arguments)
+    
+    #### BasicController Implementation #############################
+    
+
+class UnknownController(CmdController):
+    def __init__(self, name):
+        CmdController.__init__(self)
+        self.name = name
+    
+    def execute(self, app, name, arguments = None):
+        name = CmdName.make(name)
+        if name.is_empty:
+            sys.stderr.write("ERROR: Default command undefined.\n")
+        else:
+            sys.stderr.write("ERROR: Unknown command: %s\n" % (name, ))
+        return 1
+
+
 class CommandController(object):
     NAME = "cmd"
     
@@ -360,11 +462,17 @@ class CommandController(object):
         return result
     
     def add_child(self, controller, name = None):
+        """
+        Add child controller.
+        """
         if name is None:
             name = controller.name
         self.children[name] = controller
     
     def add_cmd(self, cmd):
+        """
+        Add a command to this controller.
+        """
         LOGGER.debug("Adding command \"%s\" to controller \"%s\"...", cmd.name, self.name)
         self.commands[cmd.name] = cmd
     
