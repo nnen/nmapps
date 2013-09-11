@@ -168,7 +168,7 @@ def cmd_to_str(cmd):
 
 
 class CmdName(object):
-    def __init__(self, name):
+    def __init__(self, name = None):
         self.name = split_cmd(name)
     
     def __repr__(self):
@@ -188,6 +188,10 @@ class CmdName(object):
             return CmdName(self.name.__getitem__(key))
         return self.name.__getitem__(key)
     
+    def __add__(self, rhs):
+        rhs = CmdName.make(rhs)
+        return CmdName(self.name + rhs.name)
+    
     @property
     def is_empty(self):
         return len(self.name) == 0
@@ -197,6 +201,15 @@ class CmdName(object):
         if isinstance(value, cls):
             return value
         return CmdName(value, **kwargs)
+
+
+class CmdContext(object):
+    def __init__(self, app, name):
+        self.app  = app
+        self.name = CmdName.make(name)
+        
+        self.real_name = CmdName()
+        self.controller = None
 
 
 class Command(object):
@@ -315,6 +328,8 @@ class CommandApp(AppBase):
     #### CommandApp implementation ##################################
     
     def initialize_root_controller(self, ctrl):
+        ctrl.add_object(self)
+        
         key = self.__module__ + "." + self.__class__.__name__ + ".controller"
         controllers = injection.get_all(key)
         for child in controllers:
@@ -345,10 +360,16 @@ class CommandApp(AppBase):
         return result
     
     def execute_command(self, name, cmd_args = None):
-        full_name = split_cmd(name)
-        if cmd_args is None:
-            cmd_args = []
-        return self.root_ctrl.execute_command(self, full_name, (), cmd_args)
+        ctx  = CmdContext(self, name)
+        ctrl = self.root_ctrl.route(ctx, ctx.name)
+        ctx.controller = ctrl
+        sys.stderr.write("Command %r routed to controller %r.\n" % (name, ctrl, ))
+        sys.stderr.write("Real name: %s.\n" % (ctx.real_name, ))
+        return ctrl.execute(ctx, cmd_args)
+        #full_name = split_cmd(name)
+        #if cmd_args is None:
+        #    cmd_args = []
+        #return self.root_ctrl.execute_command(self, full_name, (), cmd_args)
     
     def handle_ambiguous_command(self, name, args):
         alt = self.cmd_map[name]
@@ -363,11 +384,17 @@ class CommandApp(AppBase):
 class CmdController(object):
     # Basic Protocol ##########################################
     
-    def route(self, name):
-        name = CmdName.make(name)
-        return UnknownController(name)
+    @property
+    def description(self):
+        return ""
     
-    def execute(self, app, name, arguments = None):
+    def route(self, ctx, name):
+        if len(name) == 0:
+            return self
+        ctx.real_name += name
+        return UnknownController2(name)
+    
+    def execute(self, ctx, arguments = None):
         raise NotImplementedError
     
     # Other ###################################################
@@ -376,7 +403,7 @@ class CmdController(object):
     def make(self, value):
         if isinstance(value, CmdController):
             return value
-        if inspect.isroutine(value):
+        if FunctionController.is_valid(value):
             return FunctionController(value)
         ctrl = BasicController()
         ctrl.add_object(value)
@@ -394,8 +421,25 @@ class FunctionController(CmdController):
             name = FunctionController.reflect_name(self.function)
         self.name = name
     
-    def execute(self, app, name, arguments = None):
-        self.function(app, name, arguments)
+    def __repr__(self):
+        return "%s(name = %r)" % (type(self).__name__, self.name, )
+    
+    @property
+    def description(self):
+        if self.function and self.function.__doc__:
+            return self.function.__doc__.strip()
+        return ""
+    
+    def execute(self, ctx, arguments = None):
+        self.function(ctx, arguments)
+    
+    @classmethod
+    def is_valid(cls, value):
+        if not inspect.isroutine(value):
+            return False
+        if value.__name__.startswith(cls.NAME_PREFIX):
+            return True
+        return False
     
     @classmethod
     def reflect_name(self, function):
@@ -413,24 +457,42 @@ class BasicController(CmdController):
         self.name = name
         self.default_cmd = default_cmd
         self.children = utils.PrefixDict()
+        
+        self.add_object(self)
+        #self.add_child(FunctionController(self.cmd_help))
+
+    def __repr__(self):
+        return "%s(%r)" % (type(self).__name__, self.name)
     
     #### Basic Protocol #############################################
     
-    def route(self, name):
-        name = CmdName.make(name)
-        
+    def route(self, ctx, name):
         if len(name) < 1:
-            return self, name
+            return self
+            #return self, name
         
-        child_name, child = self.children[name[0]]
+        try:
+            child_name, child = self.children[name[0]]
+        except KeyError:
+            ctx.real_name += name[0]
+            return UnknownController2(name)
+        
         if child is not None:
-            return child.route_command(name[1:])
+            ctx.real_name += child_name
+            return child.route(ctx, name[1:])
         
-        return UnknownController(name)
+        ctx.real_name += name[0]
+        return UnknownController2(name)
     
-    def execute(self, app, name, arguments = None):
+    def execute(self, ctx, arguments = None):
         if self.default_cmd is not None:
-            return self.default_cmd.execute(app, name, arguments)
+            return self.default_cmd.execute(ctx, arguments)
+
+        sys.stderr.write(("ERROR: Controller \"%s\" has no default command. Use "
+                          "\"%s:help\" to see available commands.\n") %
+                          (ctx.real_name, ctx.real_name, ))
+        
+        return 1
     
     #### BasicController Implementation #############################
     
@@ -440,20 +502,42 @@ class BasicController(CmdController):
         self.children[name] = ctrl
     
     def add_object(self, obj):
-        pass
+        for name, value in ((attr, getattr(obj, attr)) for attr in dir(obj)):
+            if FunctionController.is_valid(value):
+                self.add_child(FunctionController(value))
+    
+    def cmd_help(self, ctx, arguments = None):
+        """Displays this help."""
+        
+        w = sys.stderr.write
+        w("Commands:\n")
+
+        for name, child in self.children.iteritems():
+            w("   %s\n      %s\n\n" % (name, child.description, ))
+        
+        #for cmd in self.commands.itervalues():
+        #    #if len(self.cmd_map[cmd.name[:1]]) == 1:
+        #    #    w("\t[%s]%s\t%s\n" % (cmd.name[:1], cmd.name[1:], cmd.description, ))
+        #    #else:
+        #    #    w("\t%s\t%s\n" % (cmd.name, cmd.description, ))
+        #    desc = ""
+        #    if cmd.description is not None:
+        #        desc = cmd.description.strip()
+        #    w("\t%s\t%s\n" % (cmd.name, desc, ))
+        
+        w("\n")
 
 
-class UnknownController(CmdController):
+class UnknownController2(CmdController):
     def __init__(self, name):
         CmdController.__init__(self)
         self.name = name
     
-    def execute(self, app, name, arguments = None):
-        name = CmdName.make(name)
-        if name.is_empty:
+    def execute(self, ctx, arguments = None):
+        if ctx.name.is_empty:
             sys.stderr.write("ERROR: Default command undefined.\n")
         else:
-            sys.stderr.write("ERROR: Unknown command: %s\n" % (name, ))
+            sys.stderr.write("ERROR: Unknown command: %s\n" % (ctx.real_name, ))
         return 1
 
 
