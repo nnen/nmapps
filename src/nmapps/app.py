@@ -210,77 +210,11 @@ class CmdContext(object):
         
         self.real_name = CmdName()
         self.controller = None
-
-
-class Command(object):
-    """Represents a :class:`CommandApp` command.
-    """
     
-    METHOD_PREFIX = "cmd_"
-    DECORATOR_ATTR = "__app_cmd__"
-    
-    def __init__(self, name, desc = None, callback = None):
-        self.name = name
-        self.description = desc
-        self.callback = callback
-    
-    def __repr__(self):
-        return utils.obj_repr(self, self.name)
-    
-    def execute(self, *args, **kwargs):
-        self.callback(*args, **kwargs)
-    
-    @classmethod
-    def decorate(cls, name, desc = None):
-        # Decorator has been called directory on the function/method without
-        # arguments.
-        if hasattr(name, "im_func") or hasattr(name, "func_code"):
-            setattr(name, cls.DECORATOR_ATTR, {
-                "name": cls.method_name_to_cmd(name.__name__),
-                "desc": name.__doc__,
-            })
-            return name
-        
-        # Decorator has been called with arguments.
-        def decorator(fn):
-            setattr(fn, cls.DECORATOR_ATTR, {
-                "name": name,
-                "desc": desc or fn.__doc__,
-            })
-            return fn
-        return decorator
-    
-    @classmethod
-    def method_name_to_cmd(cls, name):
-        if name.startswith(cls.METHOD_PREFIX):
-            return name[len(cls.METHOD_PREFIX):]
-        return name
-    
-    @classmethod
-    def from_method(cls, method):
-        dec = getattr(method, cls.DECORATOR_ATTR, None)
-        if dec is not None:
-            return cls(dec["name"], dec["desc"], method)
-        
-        if not (hasattr(method, "__name__") and method.__name__.startswith(cls.METHOD_PREFIX)):
-            return None
-        
-        cmd = method.__name__[len(cls.METHOD_PREFIX):]
-        desc = getattr(method, "__doc__", None)
-        return cls(cmd, desc, method)
-    
-    @classmethod
-    def reflect(cls, obj):
-        result = []
-        for attr_name, attr in ((n, getattr(obj, n)) for n in dir(obj)):
-            if inspect.isroutine(attr):
-                cmd = cls.from_method(attr)
-                if cmd is not None:
-                    result.append(cmd)
-        return result
-
-
-appcmd = Command.decorate
+    def __iadd__(self, rhs):
+        if not isinstance(rhs, CmdContext):
+            raise TypeError
+        self.real_name += rhs.real_name
 
 
 class CommandApp(AppBase):
@@ -382,6 +316,9 @@ class CommandApp(AppBase):
 
 
 class CmdController(object):
+    def __repr__(self):
+        return utils.obj_repr(self)
+    
     # Basic Protocol ##########################################
     
     @property
@@ -392,7 +329,7 @@ class CmdController(object):
         if len(name) == 0:
             return self
         ctx.real_name += name
-        return UnknownController2(name)
+        return UnknownController(name)
     
     def execute(self, ctx, arguments = None):
         raise NotImplementedError
@@ -405,6 +342,7 @@ class CmdController(object):
             return value
         if FunctionController.is_valid(value):
             return FunctionController(value)
+        
         ctrl = BasicController()
         ctrl.add_object(value)
         return ctrl
@@ -422,7 +360,7 @@ class FunctionController(CmdController):
         self.name = name
     
     def __repr__(self):
-        return "%s(name = %r)" % (type(self).__name__, self.name, )
+        return utils.obj_repr(self, self.function, self.name)
     
     @property
     def description(self):
@@ -455,16 +393,24 @@ class BasicController(CmdController):
         CmdController.__init__(self)
         
         self.name = name
+        if isinstance(default_cmd, basestring):
+            default_cmd = ProxyController(self, default_cmd)
         self.default_cmd = default_cmd
         self.children = utils.PrefixDict()
         
         self.add_object(self)
         #self.add_child(FunctionController(self.cmd_help))
-
+    
     def __repr__(self):
-        return "%s(%r)" % (type(self).__name__, self.name)
+        return utils.obj_repr(self, self.name)
     
     #### Basic Protocol #############################################
+    
+    @property
+    def description(self):
+        if self.default_cmd:
+            return self.default_cmd.description
+        return ""
     
     def route(self, ctx, name):
         if len(name) < 1:
@@ -475,14 +421,14 @@ class BasicController(CmdController):
             child_name, child = self.children[name[0]]
         except KeyError:
             ctx.real_name += name[0]
-            return UnknownController2(name)
+            return UnknownController(name).route(ctx, name[1:])
         
         if child is not None:
             ctx.real_name += child_name
             return child.route(ctx, name[1:])
         
         ctx.real_name += name[0]
-        return UnknownController2(name)
+        return UnknownController(name)
     
     def execute(self, ctx, arguments = None):
         if self.default_cmd is not None:
@@ -528,10 +474,20 @@ class BasicController(CmdController):
         w("\n")
 
 
-class UnknownController2(CmdController):
+class UnknownController(CmdController):
     def __init__(self, name):
         CmdController.__init__(self)
         self.name = name
+    
+    def __repr__(self):
+        return utils.obj_repr(self, self.name)
+    
+    def route(self, ctx, name):
+        if len(name) == 0:
+            return self
+        
+        ctx.real_name += name[0]
+        return UnknownController(name[0]).route(ctx, name[1:])
     
     def execute(self, ctx, arguments = None):
         if ctx.name.is_empty:
@@ -541,223 +497,31 @@ class UnknownController2(CmdController):
         return 1
 
 
-class CommandController(object):
-    NAME = "cmd"
-    
-    def __init__(self, name = None, cmd_objs = None):
-        self.name = name or self.NAME
+class ProxyController(CmdController):
+    def __init__(self, ctrl, name):
+        CmdController.__init__(self)
+        self.controller = ctrl
+        self.name       = CmdName.make(name)
+        self.context    = CmdContext(None, self.name)
         
-        self.children = utils.PrefixDict()
-        for child in self.initialize_children():
-            self.add_child(*child)
-        self.fallback_controller = None
-        
-        self.commands = utils.PrefixDict()
-        commands = self.initialize_commands(cmd_objs)
-        for cmd in commands:
-            self.add_cmd(cmd)
-        self.default_command_name = "help"
+        self._target    = None
     
-    def __repr__(self):
-        return utils.obj_repr(self, self.name)
+    @property
+    def target(self):
+        if self._target is None:
+            self._target = self.controller.route(self.context, self.name)
+        return self._target
     
-    def initialize_children(self):
-        return []
+    @property
+    def description(self):
+        return self.target.description
     
-    def initialize_commands(self, cmd_objs = None):
-        result = []
-        result += CommandHandler.reflect(self)
-        if cmd_objs is not None:
-            for obj in cmd_objs:
-                result += CommandHandler.reflect(obj)
-        return result
+    def route(self, ctx, name):
+        ctx += self.context
+        return self.target.route(ctx, name)
     
-    def add_child(self, controller, name = None):
-        """
-        Add child controller.
-        """
-        if name is None:
-            name = controller.name
-        self.children[name] = controller
-    
-    def add_cmd(self, cmd):
-        """
-        Add a command to this controller.
-        """
-        LOGGER.debug("Adding command \"%s\" to controller \"%s\"...", cmd.name, self.name)
-        self.commands[cmd.name] = cmd
-    
-    def get_child_controller(self, name, context):
-        """Returns a child controller for a given name.
-        """
-        try:
-            alternatives = self.children[name]
-        except KeyError:
-            return self.get_unknown_child_controller(name, context)
-        
-        if len(alternatives) > 1:
-            raise ValueError # TODO: Raise better exception - something like AmbiguousCommandException
-        
-        name, value = alternatives.pop()
-        return value, (name, )
-    
-    def get_unknown_child_controller(self, name, context):
-        #return name, self.fallback_controller or UNKNOWN_CONTROLLER
-        return None, None
-    
-    def route_command(self, name, context = None):
-        if context is None:
-            context = tuple()
-        
-        if len(name) > 0:
-            child, child_name = self.get_child_controller(name[0], context)
-            if child is not None:
-                return child.route_command(name[1:], context + child_name)
-        
-        return self, name, context
-    
-    def get_command(self, name, context):
-        # TODO: Fix this, the rest of the name is ignored.
-        assert isinstance(name, tuple)
-        if isinstance(name, tuple):
-            if len(name) < 1:
-                name = (self.default_command_name, )
-            simple_name = name[-1]
-        
-        try:
-            alternatives = self.commands[simple_name]
-        except KeyError:
-            return self.get_unknown_command(name, context)
-        
-        if len(alternatives) > 1:
-            raise ValueError # TODO: Raise better exception - something like AmbiguousCommandException
-        
-        cmd_name, command = alternatives.pop()
-        return command, cmd_name, context + (cmd_name, )
-    
-    def get_unknown_command(self, name, context):
-        return UNKNOWN_COMMAND_HANDLER, name, context + name
-    
-    def execute_command(self, app, name, context, arguments = None):
-        ctrl, cmd_name, ctrl_name = self.route_command(name, context)
-        command, cmd_simple_name, cmd_full_name = ctrl.get_command(cmd_name, ctrl_name)
-        LOGGER.debug("Routing command %s to controller %r, command %s.", cmd_to_str(context + name), ctrl, cmd_to_str(cmd_full_name))
-        #LOGGER.debug("Getting command %r from controller %r: %r.", cmd_simple_name, ctrl, command)
-        
-        LOGGER.info("Executing command %s...", cmd_to_str(cmd_full_name))
-        return command.execute(app, ctrl, name, cmd_full_name, arguments)
-    
-    def cmd_help(self, app, ctrl, name, full_name, cmd_args):
-        """Displays this help."""
-        
-        w = sys.stderr.write
-        w("Commands:\n")
-        
-        for cmd in self.commands.itervalues():
-            #if len(self.cmd_map[cmd.name[:1]]) == 1:
-            #    w("\t[%s]%s\t%s\n" % (cmd.name[:1], cmd.name[1:], cmd.description, ))
-            #else:
-            #    w("\t%s\t%s\n" % (cmd.name, cmd.description, ))
-            desc = ""
-            if cmd.description is not None:
-                desc = cmd.description.strip()
-            w("\t%s\t%s\n" % (cmd.name, desc, ))
-        
-        w("\n")
-
-
-class CommandHandler(object):
-    """Represents a :class:`CommandApp` command handler.
-    """
-    
-    METHOD_PREFIX = "cmd_"
-    DECORATOR_ATTR = "__app_cmd__"
-    
-    def __init__(self, name, desc = None, callback = None):
-        self.name = name
-        self.description = desc
-        self.callback = callback
-    
-    def __repr__(self):
-        return utils.obj_repr(self, self.name)
-    
-    def execute(self, *args, **kwargs):
-        self.callback(*args, **kwargs)
-    
-    @classmethod
-    def decorate(cls, name, desc = None):
-        # Decorator has been called directory on the function/method without
-        # arguments.
-        if hasattr(name, "im_func") or hasattr(name, "func_code"):
-            setattr(name, cls.DECORATOR_ATTR, {
-                "name": cls.method_name_to_cmd(name.__name__),
-                "desc": name.__doc__,
-            })
-            return name
-        
-        # Decorator has been called with arguments.
-        def decorator(fn):
-            setattr(fn, cls.DECORATOR_ATTR, {
-                "name": name,
-                "desc": desc or fn.__doc__,
-            })
-            return fn
-        return decorator
-    
-    @classmethod
-    def method_name_to_cmd(cls, name):
-        if name.startswith(cls.METHOD_PREFIX):
-            return name[len(cls.METHOD_PREFIX):]
-        return name
-    
-    @classmethod
-    def from_method(cls, method):
-        # Check if the method is decorated and use the decorator if it is.
-        dec = getattr(method, cls.DECORATOR_ATTR, None)
-        if dec is not None:
-            return cls(dec["name"], dec["desc"], method)
-        
-        # Check if the method has magical name. If it doesn't, stop trying.
-        if not (hasattr(method, "__name__") and method.__name__.startswith(cls.METHOD_PREFIX)):
-            return None
-        
-        cmd = method.__name__[len(cls.METHOD_PREFIX):]
-        desc = getattr(method, "__doc__", None)
-        return cls(cmd, desc, method)
-    
-    @classmethod
-    def reflect(cls, obj):
-        result = []
-        for attr_name, attr in ((n, getattr(obj, n)) for n in dir(obj)):
-            if inspect.isroutine(attr):
-                cmd = cls.from_method(attr)
-                if cmd is not None:
-                    result.append(cmd)
-        return result
-
-
-class UnknownCommandHandler(CommandHandler):
-    def __init__(self):
-        CommandHandler.__init__(self, "unknown")
-    
-    def execute(self, app, ctrl, name, full_name, arguments):
-        if full_name[-1] == ctrl.default_command_name:
-            sys.stderr.write("ERROR: Default command undefined.\n")
-        else:
-            sys.stderr.write("ERROR: Unknown command: %s\n" % (":".join(full_name), ))
-        return 1
-
-UNKNOWN_COMMAND_HANDLER = UnknownCommandHandler()
-
-
-class UnknownController(CommandController):
-    def get_child_controller(self, name, full_name):
-        return name, self
-    
-    def get_command(self, name, full_name):
-        return UnknownCommand()
-
-UNKNOWN_CONTROLLER = UnknownController()
+    def execute(self, ctx, arguments = None):
+        return self.target.execute(ctx, arguments)
 
 
 #####################################################################

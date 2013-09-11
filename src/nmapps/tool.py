@@ -188,9 +188,10 @@ class UtilApp(app.CommandApp):
         tpl.instantiate()
 
 
-@injection.factory("nmapps.tool.UtilApp.controller", None, "test")
+@injection.factory("nmapps.tool.UtilApp.controller", None, "test", "test")
 class TestCtrl(app.BasicController):
     def cmd_test(self, ctx, cmd_args):
+        """A test command in the test command controller."""
         print "This is TestCtrl command controller."
 
 
