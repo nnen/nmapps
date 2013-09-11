@@ -258,6 +258,9 @@ class PrefixDict(object):
             except KeyError:
                 self.prefixes[key[:i]] = set([(key, value), ])
     
+    def __contains__(self, key):
+        return key in self.values
+    
     def get(self, key):
         key = str(key)
         

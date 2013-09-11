@@ -168,32 +168,29 @@ def cmd_to_str(cmd):
 
 
 class CmdName(object):
-    def __init__(self, name, namespace = None):
-        self.name      = split_cmd(name)
-        self.namespace = split_cmd(namespace)
+    def __init__(self, name):
+        self.name = split_cmd(name)
     
     def __repr__(self):
-        return utils.obj_repr(self, self.name, self.namespace)
+        return utils.obj_repr(self, join_cmd(self.name))
     
     def __str__(self):
-        return join_cmd(self.full)
+        return join_cmd(self.name)
     
     def __len__(self):
         return len(self.name)
-
+    
     def __iter__(self):
         return iter(self.name)
     
     def __getitem__(self, key):
+        if isinstance(key, slice):
+            return CmdName(self.name.__getitem__(key))
         return self.name.__getitem__(key)
     
     @property
     def is_empty(self):
-        return len(self.name) + len(self.namespace) == 0
-    
-    @property
-    def full(self):
-        return self.namespace + self.name
+        return len(self.name) == 0
     
     @classmethod
     def make(cls, value, **kwargs):
@@ -293,7 +290,7 @@ class CommandApp(AppBase):
         #
         #self.discover_commands()
         
-        self.root_ctrl = CommandController("root", (self, ))
+        self.root_ctrl = BasicController("root")
         self.initialize_root_controller(self.root_ctrl)
     
     #### AppBase implementation #####################################
@@ -374,25 +371,47 @@ class CmdController(object):
         raise NotImplementedError
     
     # Other ###################################################
+    
+    @classmethod
+    def make(self, value):
+        if isinstance(value, CmdController):
+            return value
+        if inspect.isroutine(value):
+            return FunctionController(value)
+        ctrl = BasicController()
+        ctrl.add_object(value)
+        return ctrl
 
 
-class SimpleController(CmdController):
-    def __init__(self, name, handler):
+class FunctionController(CmdController):
+    NAME_PREFIX = "cmd_"
+    
+    def __init__(self, function, name = None):
         CmdController.__init__(self)
+        self.function = function
+        
+        if name is None:
+            name = FunctionController.reflect_name(self.function)
         self.name = name
-        self.handler = handler
     
     def execute(self, app, name, arguments = None):
-        if self.handler is None:
-            UnknownController(self.name).execute(app, name, arguments)
-        return self.handler(app, name, namespace, arguments)
+        self.function(app, name, arguments)
+    
+    @classmethod
+    def reflect_name(self, function):
+        if inspect.isroutine(function):
+            if function.__name__.startswith(self.NAME_PREFIX):
+                return function.__name__[len(self.NAME_PREFIX):]
+            return function.__name__
+        raise ValueError
 
 
-class BasicController(SimpleController):
-    def __init__(self, name, handler = None):
-        SimpleController.__init__(self, name, handler)
+class BasicController(CmdController):
+    def __init__(self, name = None, default_cmd = None):
+        CmdController.__init__(self)
         
-        self.default_cmd = None
+        self.name = name
+        self.default_cmd = default_cmd
         self.children = utils.PrefixDict()
     
     #### Basic Protocol #############################################
@@ -415,6 +434,14 @@ class BasicController(SimpleController):
     
     #### BasicController Implementation #############################
     
+    def add_child(self, ctrl, name = None):
+        ctrl = CmdController.make(ctrl)
+        name = name or ctrl.name
+        self.children[name] = ctrl
+    
+    def add_object(self, obj):
+        pass
+
 
 class UnknownController(CmdController):
     def __init__(self, name):
